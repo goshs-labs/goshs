@@ -1,6 +1,31 @@
 version: 2
 updates:
+  # GitHub Actions used by the workflows
   - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # Go module dependencies. Minor/patch bumps are batched into a single PR to
+  # keep noise low; major bumps come as individual PRs so they get scrutiny.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # Base images in the Dockerfile (golang:*-alpine builder, alpine runtime)
+  - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
