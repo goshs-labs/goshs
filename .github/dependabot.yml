@@ -16,6 +16,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Pinned to v0.1.0: docker/docker v28.5.2 requires the top-level
+      # archive.Compression alias that go-archive removed in v0.2.0, so bumping
+      # it breaks `go vet`. Unpin once docker/docker is upgraded to a release
+      # compatible with go-archive >= v0.2.0.
+      - dependency-name: "github.com/moby/go-archive"
     groups:
       go-minor-patch:
         patterns:
