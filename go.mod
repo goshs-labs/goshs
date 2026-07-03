@@ -9,7 +9,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/coder/websocket v1.8.13
 	github.com/docker/docker v28.0.1+incompatible
-	github.com/docker/go-connections v0.5.0
+	github.com/docker/go-connections v0.7.0
 	github.com/emersion/go-smtp v0.24.0
 	github.com/fclairamb/ftpserverlib v0.31.0
 	github.com/gliderlabs/ssh v0.3.8
