@@ -31,7 +31,7 @@ require (
 	golang.org/x/net v0.55.0
 	golang.org/x/term v0.44.0
 	golang.org/x/text v0.38.0
-	software.sslmate.com/src/go-pkcs12 v0.7.2
+	software.sslmate.com/src/go-pkcs12 v0.7.3
 )
 
 require (
