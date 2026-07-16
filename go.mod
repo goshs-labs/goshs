@@ -20,7 +20,7 @@ require (
 	github.com/inconshreveable/go-update v0.0.0-20160112193335-8152e7eb6ccf
 	github.com/miekg/dns v1.1.72
 	github.com/moby/moby/api v1.55.0
-	github.com/pkg/sftp v1.13.9
+	github.com/pkg/sftp v1.13.11
 	github.com/sirupsen/logrus v1.9.4
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/spf13/afero v1.15.0
