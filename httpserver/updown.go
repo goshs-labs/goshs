@@ -131,9 +131,17 @@ func (fs *FileServer) upload(w http.ResponseWriter, req *http.Request) {
 			continue // skip form fields
 		}
 
-		// sanitize filename (No path traversal)
+		// sanitize filename (No path traversal). part.FileName() already applies
+		// filepath.Base, but that still lets ".." through, and filepath.Join with
+		// ".." would resolve to the parent of targetDir — writing outside the
+		// served tree. Reject any name that is empty, "." or ".." after cleaning.
 		filenameSlice := strings.Split(part.FileName(), "/")
 		filenameClean := filenameSlice[len(filenameSlice)-1]
+
+		if filenameClean == "" || filenameClean == "." || filenameClean == ".." {
+			logger.Warnf("blocked upload with invalid filename %q", part.FileName())
+			continue
+		}
 
 		// Block overwriting the .goshs ACL file
 		if filenameClean == ".goshs" {
@@ -144,6 +152,14 @@ func (fs *FileServer) upload(w http.ResponseWriter, req *http.Request) {
 		// Prepare destination file paths
 		finalPath := filepath.Join(targetDir, filenameClean)
 		tempPath := finalPath + "~"
+
+		// Defence in depth: ensure the resolved destination stays inside targetDir
+		// even if filenameClean ever slips a separator or traversal past the checks
+		// above.
+		if _, err := sanitizePath(targetDir, filenameClean); err != nil {
+			logger.Warnf("blocked upload escaping target directory: %q", part.FileName())
+			continue
+		}
 
 		// Create temp file
 		dst, err := os.Create(tempPath)

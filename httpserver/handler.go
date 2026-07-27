@@ -784,10 +784,21 @@ func (fs *FileServer) sendFile(w http.ResponseWriter, req *http.Request, file *o
 		}
 	}
 
+	stat, err := file.Stat()
+	if err != nil {
+		fs.handleError(w, req, err, http.StatusInternalServerError)
+		return
+	}
+
+	// Derive the served filename from the actually opened file, not from the raw
+	// request path. A trailing slash (e.g. /dir/.goshs/) leaves req.URL.Path with
+	// an empty final segment, while sanitizePath's filepath.Clean strips it and
+	// opens the real file — so basing the checks below on req.URL.Path defeats
+	// both guards. stat.Name() cannot disagree with the file that gets served.
+	filename := stat.Name()
+
 	// Never serve .goshs file and return same error message if it was not there
 	// This way it is also not possible to enumerate
-	pathSplit := strings.Split(req.URL.Path, "/")
-	filename := pathSplit[len(pathSplit)-1]
 	if filename == ".goshs" {
 		fs.handleError(w, req, fmt.Errorf("open %s: no such file or directory", file.Name()), 404)
 		return
@@ -796,12 +807,6 @@ func (fs *FileServer) sendFile(w http.ResponseWriter, req *http.Request, file *o
 	// Check if file is in block list and discard
 	if slices.Contains(acl.Block, filename) {
 		fs.handleError(w, req, fmt.Errorf("open %s: no such file or directory", file.Name()), 404)
-		return
-	}
-
-	stat, err := file.Stat()
-	if err != nil {
-		fs.handleError(w, req, err, http.StatusInternalServerError)
 		return
 	}
 
