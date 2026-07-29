@@ -52,6 +52,16 @@ func (fs *FileServer) put(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Overwriting an existing file with O_TRUNC destroys its previous contents,
+	// which is a deletion. Block it under --no-delete / --upload-only, mirroring
+	// the WebDAV PUT/COPY overwrite guard. Creating a new file stays allowed.
+	if fs.UploadOnly || fs.NoDelete {
+		if info, statErr := os.Stat(savepath); statErr == nil && !info.IsDir() {
+			fs.handleError(w, req, fmt.Errorf("%s", "Overwriting existing files is not allowed due to 'no delete' / 'upload only' option"), http.StatusForbidden)
+			return
+		}
+	}
+
 	// Enforce .goshs ACL and upload size limit
 	if !fs.prepareWrite(w, req, filepath.Dir(savepath)) {
 		return
@@ -152,6 +162,16 @@ func (fs *FileServer) upload(w http.ResponseWriter, req *http.Request) {
 		// Prepare destination file paths
 		finalPath := filepath.Join(targetDir, filenameClean)
 		tempPath := finalPath + "~"
+
+		// The final os.Rename clobbers any existing same-named file, destroying
+		// its contents. Skip such overwrites under --no-delete / --upload-only,
+		// matching the WebDAV PUT/COPY overwrite guard; new files still upload.
+		if fs.UploadOnly || fs.NoDelete {
+			if info, statErr := os.Stat(finalPath); statErr == nil && !info.IsDir() {
+				logger.Warnf("blocked overwrite of existing file %q due to 'no delete' / 'upload only' option", finalPath)
+				continue
+			}
+		}
 
 		// Defence in depth: ensure the resolved destination stays inside targetDir
 		// even if filenameClean ever slips a separator or traversal past the checks

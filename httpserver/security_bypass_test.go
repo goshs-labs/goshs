@@ -134,3 +134,108 @@ func TestUpload_ValidFilename_Succeeds(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "hello", string(got))
 }
+
+// GHSA-966r-mw4j-rv64: HTTP PUT opens the target with O_TRUNC, so overwriting an
+// existing file destroys its contents. Under --no-delete that must be blocked and
+// the file left intact.
+func TestPut_NoDelete_BlocksOverwrite(t *testing.T) {
+	webroot := t.TempDir()
+	fs, cleanup := newTestFileServer(t, webroot)
+	defer cleanup()
+	fs.NoDelete = true
+	require.NoError(t, os.WriteFile(filepath.Join(webroot, "victim.txt"), []byte("VICTIM"), 0644))
+
+	r := httptest.NewRequest(http.MethodPut, "/victim.txt", bytes.NewBufferString("CLOBBERED"))
+	r.Header.Set("X-CSRF-Token", "test-csrf")
+	w := httptest.NewRecorder()
+
+	fs.put(w, r)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	got, err := os.ReadFile(filepath.Join(webroot, "victim.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "VICTIM", string(got), "existing file must not be truncated/overwritten")
+}
+
+// --upload-only likewise forbids destroying existing content via PUT overwrite.
+func TestPut_UploadOnly_BlocksOverwrite(t *testing.T) {
+	webroot := t.TempDir()
+	fs, cleanup := newTestFileServer(t, webroot)
+	defer cleanup()
+	fs.UploadOnly = true
+	require.NoError(t, os.WriteFile(filepath.Join(webroot, "victim.txt"), []byte("VICTIM"), 0644))
+
+	r := httptest.NewRequest(http.MethodPut, "/victim.txt", bytes.NewBufferString("CLOBBERED"))
+	r.Header.Set("X-CSRF-Token", "test-csrf")
+	w := httptest.NewRecorder()
+
+	fs.put(w, r)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	got, err := os.ReadFile(filepath.Join(webroot, "victim.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "VICTIM", string(got))
+}
+
+// Creating a new file via PUT destroys nothing and must stay allowed under
+// --no-delete. Confirms the overwrite guard does not over-block fresh writes.
+func TestPut_NoDelete_AllowsNewFile(t *testing.T) {
+	webroot := t.TempDir()
+	fs, cleanup := newTestFileServer(t, webroot)
+	defer cleanup()
+	fs.NoDelete = true
+
+	r := httptest.NewRequest(http.MethodPut, "/fresh.txt", bytes.NewBufferString("NEW"))
+	r.Header.Set("X-CSRF-Token", "test-csrf")
+	w := httptest.NewRecorder()
+
+	fs.put(w, r)
+
+	got, err := os.ReadFile(filepath.Join(webroot, "fresh.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "NEW", string(got))
+}
+
+// The multipart upload path renames the temp file over any existing same-named
+// file, clobbering it. Under --no-delete that overwrite must be skipped and the
+// existing file left intact.
+func TestUpload_NoDelete_BlocksOverwrite(t *testing.T) {
+	webroot := t.TempDir()
+	fs, cleanup := newTestFileServer(t, webroot)
+	defer cleanup()
+	fs.NoDelete = true
+	require.NoError(t, os.WriteFile(filepath.Join(webroot, "victim.txt"), []byte("VICTIM"), 0644))
+
+	body, ctype := multipartUpload(t, "victim.txt", "CLOBBERED")
+	r := httptest.NewRequest(http.MethodPost, "/upload", body)
+	r.Header.Set("Content-Type", ctype)
+	r.Header.Set("X-CSRF-Token", "test-csrf")
+	w := httptest.NewRecorder()
+
+	fs.upload(w, r)
+
+	got, err := os.ReadFile(filepath.Join(webroot, "victim.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "VICTIM", string(got), "existing file must not be clobbered by upload")
+}
+
+// A new-named upload must still succeed under --no-delete.
+func TestUpload_NoDelete_AllowsNewFile(t *testing.T) {
+	webroot := t.TempDir()
+	fs, cleanup := newTestFileServer(t, webroot)
+	defer cleanup()
+	fs.NoDelete = true
+
+	body, ctype := multipartUpload(t, "fresh.txt", "NEW")
+	r := httptest.NewRequest(http.MethodPost, "/upload", body)
+	r.Header.Set("Content-Type", ctype)
+	r.Header.Set("X-CSRF-Token", "test-csrf")
+	w := httptest.NewRecorder()
+
+	fs.upload(w, r)
+
+	require.Equal(t, http.StatusSeeOther, w.Code)
+	got, err := os.ReadFile(filepath.Join(webroot, "fresh.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "NEW", string(got))
+}

@@ -147,3 +147,75 @@ func TestWebdav_Default_AllowsMove(t *testing.T) {
 	require.True(t, fileMissing(t, dir, "secret.txt"), "MOVE should remove the source")
 	require.Equal(t, "TOP-SECRET", fileContent(t, dir, "gone.txt"))
 }
+
+// GHSA-rc9g-fmpg-c6pp: golang.org/x/net/webdav routes POST to the same read
+// handler as GET, so an unguarded POST returned the full file body, bypassing
+// the GET/HEAD --upload-only block. POST must be rejected outright and never
+// leak file contents — here under --upload-only.
+func TestWebdav_UploadOnly_PostDoesNotLeak(t *testing.T) {
+	dir := webdavModeTree(t)
+	fs, cleanup := newTestFileServer(t, dir)
+	defer cleanup()
+	fs.UploadOnly = true
+	h := newWebdavTestHandler(fs)
+
+	w := davReq(t, h, "POST", "/secret.txt", "", "")
+	require.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	require.NotContains(t, w.Body.String(), "TOP-SECRET", "POST must not leak file contents")
+}
+
+// POST must be rejected even with no mode flags — it has no legitimate WebDAV
+// use here and would otherwise alias GET.
+func TestWebdav_Default_PostRejected(t *testing.T) {
+	dir := webdavModeTree(t)
+	fs, cleanup := newTestFileServer(t, dir)
+	defer cleanup()
+	h := newWebdavTestHandler(fs)
+
+	w := davReq(t, h, "POST", "/secret.txt", "", "")
+	require.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	require.NotContains(t, w.Body.String(), "TOP-SECRET")
+}
+
+// GHSA-966r-mw4j-rv64: a PUT onto an existing file truncates/replaces its
+// contents. Under --no-delete that overwrite must be blocked and the existing
+// file left intact.
+func TestWebdav_NoDelete_BlocksPutOverwrite(t *testing.T) {
+	dir := webdavModeTree(t)
+	fs, cleanup := newTestFileServer(t, dir)
+	defer cleanup()
+	fs.NoDelete = true
+	h := newWebdavTestHandler(fs)
+
+	w := davReq(t, h, "PUT", "/victim.txt", "", "")
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Equal(t, "VICTIM", fileContent(t, dir, "victim.txt"), "existing file must survive a blocked PUT")
+}
+
+// --upload-only likewise forbids destroying existing content via PUT overwrite.
+func TestWebdav_UploadOnly_BlocksPutOverwrite(t *testing.T) {
+	dir := webdavModeTree(t)
+	fs, cleanup := newTestFileServer(t, dir)
+	defer cleanup()
+	fs.UploadOnly = true
+	h := newWebdavTestHandler(fs)
+
+	w := davReq(t, h, "PUT", "/victim.txt", "", "")
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Equal(t, "VICTIM", fileContent(t, dir, "victim.txt"))
+}
+
+// A PUT that creates a brand-new file destroys nothing and must stay allowed
+// under --no-delete (upload-only permits uploads by definition). Confirms the
+// overwrite guard does not over-block fresh writes.
+func TestWebdav_NoDelete_AllowsPutNewFile(t *testing.T) {
+	dir := webdavModeTree(t)
+	fs, cleanup := newTestFileServer(t, dir)
+	defer cleanup()
+	fs.NoDelete = true
+	h := newWebdavTestHandler(fs)
+
+	w := davReq(t, h, "PUT", "/fresh.txt", "", "")
+	require.Less(t, w.Code, http.StatusBadRequest, "creating a new file must be allowed")
+	require.False(t, fileMissing(t, dir, "fresh.txt"), "new file should have been created")
+}

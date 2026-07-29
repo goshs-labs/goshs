@@ -48,6 +48,20 @@ func (fs *FileServer) webdavGuard(next http.Handler) http.HandlerFunc {
 				http.Error(w, "read-only", http.StatusForbidden)
 				return
 			}
+			// A PUT onto an existing file truncates/replaces its contents, which
+			// is a destruction of the previous data — gate it exactly like the
+			// overwriting COPY case. MKCOL only ever creates, so it is unaffected.
+			if r.Method == http.MethodPut && (fs.UploadOnly || fs.NoDelete) && fs.webdavTargetExists(r) {
+				http.Error(w, "overwrite disabled", http.StatusForbidden)
+				return
+			}
+		case http.MethodPost:
+			// golang.org/x/net/webdav routes POST to the same read handler as GET,
+			// so an unguarded POST returns the full file body — bypassing the
+			// GET/HEAD upload-only block below. WebDAV POST has no legitimate use
+			// in this server, so reject it outright regardless of mode.
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
 		case "COPY":
 			if fs.ReadOnly {
 				http.Error(w, "read-only", http.StatusForbidden)
@@ -82,6 +96,19 @@ func (fs *FileServer) webdavGuard(next http.Handler) http.HandlerFunc {
 		ctx := context.WithValue(r.Context(), webdavCtxKey{}, r)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	}
+}
+
+// webdavTargetExists reports whether the request URL itself already points at an
+// existing (non-directory) resource inside the webroot. Used to distinguish an
+// overwriting PUT (which truncates/replaces existing content) from a PUT that
+// merely creates a new file.
+func (fs *FileServer) webdavTargetExists(r *http.Request) bool {
+	abs, err := sanitizePath(fs.Webroot, r.URL.Path)
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(abs)
+	return err == nil && !info.IsDir()
 }
 
 // webdavDestExists reports whether the Destination header of a COPY/MOVE
