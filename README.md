@@ -157,6 +157,7 @@ These are the awesome contributors that made `goshs` even more secure :heart:
   <td align="center"><a href="https://github.com/tonghuaroot"><img src="https://github.com/tonghuaroot.png?size=50" width="50" height="50"></a></td>
   <td align="center"><a href="https://github.com/arpitjain099"><img src="https://github.com/arpitjain099.png?size=50" width="50" height="50"></a></td>
   <td align="center"><a href="https://github.com/manus-use"><img src="https://github.com/manus-use.png?size=50" width="50" height="50"></a></td>
+  <td align="center"><a href="https://github.com/shotintoeternity"><img src="https://github.com/shotintoeternity.png?size=50" width="50" height="50"></a></td>
   <td align="center"><a href="https://github.com/wooseokdotkim">wooseokdotkim</a></td>
   <td align="center"><a href="https://github.com/Guilhem7">Guilhem7</a></td>
 </tr></table>
