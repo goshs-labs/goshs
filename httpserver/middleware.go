@@ -109,11 +109,30 @@ func (fs *FileServer) verifyCredentials(r *http.Request) (authVal string, ok boo
 	return authVal, true
 }
 
+// conPtyExempt reports whether a request qualifies for the unauthenticated
+// ConPtyShell.ps1 exemption. A caught Windows host has no credentials, so the
+// generated upgrade URL (`/ConPtyShell.ps1?conpty`) must be reachable without
+// auth. The exemption is deliberately narrow: only a GET/HEAD of that exact
+// path carrying `conpty` as its *sole* query parameter qualifies. Any other
+// method (PUT/DELETE/POST) or any additional feature key (`bulk`, `ws`,
+// `goshs-info`, `catcher-api`, `cbDown`, `embedded`, …) would otherwise ride
+// the exemption and reach the authenticated API surface anonymously.
+func conPtyExempt(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if r.URL.Path != "/ConPtyShell.ps1" {
+		return false
+	}
+	q := r.URL.Query()
+	return len(q) == 1 && q.Has("conpty")
+}
+
 // BasicAuthMiddleware is a middleware to handle the basic auth
 func (fs *FileServer) BasicAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Allow unauthenticated access to ConPtyShell.ps1 for catcher upgrades
-		if r.URL.Query().Has("conpty") && r.URL.Path == "/ConPtyShell.ps1" {
+		if conPtyExempt(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -142,7 +161,7 @@ func (fs *FileServer) BasicAuthMiddleware(next http.Handler) http.Handler {
 func (fs *FileServer) InvisibleBasicAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Allow unauthenticated access to ConPtyShell.ps1 for catcher upgrades
-		if r.URL.Query().Has("conpty") && r.URL.Path == "/ConPtyShell.ps1" {
+		if conPtyExempt(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
