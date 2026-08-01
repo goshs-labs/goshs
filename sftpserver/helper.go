@@ -147,6 +147,18 @@ func writeFile(root string, r *sftp.Request, ip string, sftpServer *SFTPServer) 
 		sftpServer.HandleWebhookSend("sftp", r, ip, true)
 		return nil, err
 	}
+	// Enforce --no-delete: overwriting an existing file with os.Create truncates
+	// it, which destroys its previous contents — a deletion. Block it while still
+	// allowing creation of new files (GHSA-4wh5-87mw-whxf). Mirrors the HTTP
+	// upload handler's no-delete overwrite guard in updown.go.
+	if sftpServer.NoDelete {
+		if info, statErr := os.Stat(fullPath); statErr == nil && !info.IsDir() {
+			nErr := errors.New("overwriting existing files not allowed due to 'no delete' option")
+			logger.LogSFTPRequestBlocked(r, ip, nErr)
+			sftpServer.HandleWebhookSend("sftp", r, ip, true)
+			return nil, nErr
+		}
+	}
 	logger.LogSFTPRequest(r, ip)
 	sftpServer.HandleWebhookSend("sftp", r, ip, false)
 	return os.Create(fullPath)
@@ -163,6 +175,19 @@ func cmdFile(root string, r *sftp.Request, ip string, sftpServer *SFTPServer) er
 		logger.LogSFTPRequestBlocked(r, ip, err)
 		sftpServer.HandleWebhookSend("sftp", r, ip, true)
 		return err
+	}
+
+	// Enforce --no-delete: Remove, Rmdir and Rename all destroy or move existing
+	// content, so block them when the flag is set (GHSA-4wh5-87mw-whxf). Mirrors
+	// the FTP noDeleteFs wrapper and the HTTP no-delete guards.
+	if sftpServer.NoDelete {
+		switch r.Method {
+		case "Remove", "Rmdir", "Rename":
+			nErr := errors.New("delete/rename not allowed due to 'no delete' option")
+			logger.LogSFTPRequestBlocked(r, ip, nErr)
+			sftpServer.HandleWebhookSend("sftp", r, ip, true)
+			return nErr
+		}
 	}
 
 	switch r.Method {

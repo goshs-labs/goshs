@@ -1013,6 +1013,26 @@ func (fs *FileServer) CreateShareHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Enforce the effective .goshs ACL before minting a token. A share token is a
+	// capability handed to an unauthenticated third party, so it must only be
+	// issued for a path the caller is actually allowed to read. Without this a
+	// token minted with the global credential would bypass the per-directory
+	// block list and per-directory basic auth (GHSA-mqvv-v9g7-4h3j). Mirrors the
+	// bulkDownload ACL gate in updown.go.
+	governing := fpath
+	if !stat.IsDir() {
+		governing = filepath.Dir(fpath)
+	}
+	if acl, aclErr := fs.findEffectiveACL(governing); aclErr == nil {
+		if ok := fs.applyCustomAuth(w, r, acl); !ok {
+			return
+		}
+		if slices.Contains(acl.Block, filepath.Base(fpath)) {
+			fs.handleError(w, r, fmt.Errorf("requested file is blocked"), http.StatusNotFound)
+			return
+		}
+	}
+
 	// Fetch token
 	token := GenerateToken()
 
@@ -1117,13 +1137,24 @@ func (fs *FileServer) ShareHandler(w http.ResponseWriter, r *http.Request) {
 		r.URL.RawQuery = q.Encode()
 		fs.bulkDownload(w, r)
 	} else {
-		file, err := os.Open(filepath.Join(fs.Webroot, entry.FilePath))
+		abs := filepath.Join(fs.Webroot, entry.FilePath)
+		file, err := os.Open(abs)
 		if err != nil {
 			logger.Errorf("error opening shared file: %s", entry.FilePath)
 			fs.handleError(w, r, err, http.StatusInternalServerError)
 			return
 		}
-		fs.sendFile(w, r, file, configFile{})
+		// Resolve the effective .goshs ACL for the file's directory instead of
+		// handing sendFile an empty configFile{}. A zero ACL has Auth=="" and
+		// Block==nil, so both the per-directory basic-auth and block-list guards
+		// in sendFile would be skipped, streaming out a protected file on token
+		// redemption with no credential (GHSA-mqvv-v9g7-4h3j). The directory
+		// branch above already re-resolves the ACL per file via bulkDownload.
+		config, aclErr := fs.findEffectiveACL(filepath.Dir(abs))
+		if aclErr != nil {
+			logger.Errorf("error reading file based access config: %+v", aclErr)
+		}
+		fs.sendFile(w, r, file, config)
 	}
 }
 

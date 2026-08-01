@@ -27,6 +27,7 @@ type SFTPServer struct {
 	Root        string
 	ReadOnly    bool
 	UploadOnly  bool
+	NoDelete    bool
 	HostKeyFile string
 	Webhook     webhook.Webhook
 	Whitelist   *httpserver.Whitelist
@@ -44,6 +45,7 @@ func NewSFTPServer(opts *options.Options, wl *httpserver.Whitelist, webhook webh
 		Root:        opts.Webroot,
 		ReadOnly:    opts.ReadOnly,
 		UploadOnly:  opts.UploadOnly,
+		NoDelete:    opts.NoDelete,
 		HostKeyFile: opts.FTPHostKeyFile,
 		Webhook:     webhook,
 		Whitelist:   wl,

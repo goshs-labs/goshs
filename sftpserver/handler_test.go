@@ -217,6 +217,88 @@ func TestDefaultHandler_Filecmd(t *testing.T) {
 	require.NoError(t, h.Filecmd(r))
 }
 
+// ─── DefaultHandler + --no-delete (GHSA-4wh5-87mw-whxf) ───────────────────────
+
+// noDeleteServer is testSFTPServer with the --no-delete flag set.
+func noDeleteServer(root string) *SFTPServer {
+	srv := testSFTPServer(root)
+	srv.NoDelete = true
+	return srv
+}
+
+// With --no-delete set, Remove/Rmdir/Rename must all be refused and the target
+// must survive on disk. Before the fix the SFTP server ignored the flag entirely.
+func TestDefaultHandler_NoDelete_BlocksRemove(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "keep.txt")
+	require.NoError(t, os.WriteFile(target, []byte("data"), 0644))
+	h := &DefaultHandler{Root: dir, ClientIP: "1.2.3.4", SFTPServer: noDeleteServer(dir)}
+
+	err := h.Filecmd(&sftp.Request{Method: "Remove", Filepath: "/keep.txt"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no delete")
+	require.FileExists(t, target)
+}
+
+func TestDefaultHandler_NoDelete_BlocksRmdir(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	require.NoError(t, os.Mkdir(sub, 0755))
+	h := &DefaultHandler{Root: dir, ClientIP: "1.2.3.4", SFTPServer: noDeleteServer(dir)}
+
+	err := h.Filecmd(&sftp.Request{Method: "Rmdir", Filepath: "/sub"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no delete")
+	require.DirExists(t, sub)
+}
+
+func TestDefaultHandler_NoDelete_BlocksRename(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "orig.txt")
+	require.NoError(t, os.WriteFile(target, []byte("data"), 0644))
+	h := &DefaultHandler{Root: dir, ClientIP: "1.2.3.4", SFTPServer: noDeleteServer(dir)}
+
+	err := h.Filecmd(&sftp.Request{Method: "Rename", Filepath: "/orig.txt", Target: "/moved.txt"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no delete")
+	require.FileExists(t, target)
+	require.NoFileExists(t, filepath.Join(dir, "moved.txt"))
+}
+
+// Overwriting an existing file truncates it, which is a deletion — refuse it
+// under --no-delete while still allowing brand-new uploads.
+func TestDefaultHandler_NoDelete_BlocksOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "exists.txt")
+	require.NoError(t, os.WriteFile(target, []byte("original"), 0644))
+	h := &DefaultHandler{Root: dir, ClientIP: "1.2.3.4", SFTPServer: noDeleteServer(dir)}
+
+	_, err := h.Filewrite(&sftp.Request{Method: "Put", Filepath: "/exists.txt"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no delete")
+	// Contents must be untouched.
+	data, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	require.Equal(t, "original", string(data))
+}
+
+func TestDefaultHandler_NoDelete_AllowsNewUpload(t *testing.T) {
+	dir := t.TempDir()
+	h := &DefaultHandler{Root: dir, ClientIP: "1.2.3.4", SFTPServer: noDeleteServer(dir)}
+
+	w, err := h.Filewrite(&sftp.Request{Method: "Put", Filepath: "/new.txt"})
+	require.NoError(t, err)
+	require.NotNil(t, w)
+}
+
+func TestDefaultHandler_NoDelete_AllowsMkdir(t *testing.T) {
+	dir := t.TempDir()
+	h := &DefaultHandler{Root: dir, ClientIP: "1.2.3.4", SFTPServer: noDeleteServer(dir)}
+
+	require.NoError(t, h.Filecmd(&sftp.Request{Method: "Mkdir", Filepath: "/fresh"}))
+	require.DirExists(t, filepath.Join(dir, "fresh"))
+}
+
 // ─── ListAt ───────────────────────────────────────────────────────────────────
 
 func TestListAt_Basic(t *testing.T) {

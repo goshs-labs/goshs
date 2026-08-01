@@ -9,6 +9,8 @@ import (
 
 	"github.com/pkg/sftp"
 	"github.com/stretchr/testify/require"
+	"goshs.de/goshs/v2/httpserver"
+	"goshs.de/goshs/v2/options"
 	"goshs.de/goshs/v2/webhook"
 )
 
@@ -145,6 +147,16 @@ func TestWriteFile(t *testing.T) {
 	require.NoError(t, err)
 	_, err = file.Write([]byte("test content"))
 	require.NoError(t, err)
+}
+
+// NewSFTPServer must propagate the --no-delete flag from the options onto the
+// server struct; otherwise the enforcement in cmdFile/writeFile never engages
+// (GHSA-4wh5-87mw-whxf).
+func TestNewSFTPServer_MapsNoDelete(t *testing.T) {
+	wh := webhook.Register(false, "", "discord", []string{})
+	opts := &options.Options{NoDelete: true}
+	srv := NewSFTPServer(opts, &httpserver.Whitelist{}, *wh)
+	require.True(t, srv.NoDelete)
 }
 
 func TestCmd(t *testing.T) {
