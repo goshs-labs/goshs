@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 
 	ftplib "github.com/fclairamb/ftpserverlib"
@@ -16,30 +17,32 @@ import (
 )
 
 type FTPServer struct {
-	IP        string
-	Port      int
-	Root      string
-	Username  string
-	Password  string
-	ReadOnly  bool
-	NoDelete  bool
-	Webhook   webhook.Webhook
-	Whitelist *httpserver.Whitelist
+	IP         string
+	Port       int
+	Root       string
+	Username   string
+	Password   string
+	ReadOnly   bool
+	UploadOnly bool
+	NoDelete   bool
+	Webhook    webhook.Webhook
+	Whitelist  *httpserver.Whitelist
 
 	srv *ftplib.FtpServer // bound by Bind, served by Start
 }
 
 func NewFTPServer(opts *options.Options, wl *httpserver.Whitelist, wh webhook.Webhook) *FTPServer {
 	return &FTPServer{
-		IP:        opts.IP,
-		Port:      opts.FTPPort,
-		Root:      opts.Webroot,
-		Username:  opts.Username,
-		Password:  opts.Password,
-		ReadOnly:  opts.ReadOnly,
-		NoDelete:  opts.NoDelete,
-		Webhook:   wh,
-		Whitelist: wl,
+		IP:         opts.IP,
+		Port:       opts.FTPPort,
+		Root:       opts.Webroot,
+		Username:   opts.Username,
+		Password:   opts.Password,
+		ReadOnly:   opts.ReadOnly,
+		UploadOnly: opts.UploadOnly,
+		NoDelete:   opts.NoDelete,
+		Webhook:    wh,
+		Whitelist:  wl,
 	}
 }
 
@@ -122,17 +125,30 @@ func (d *mainDriver) AuthUser(cc ftplib.ClientContext, user, pass string) (ftpli
 	if d.srv.ReadOnly {
 		return afero.NewReadOnlyFs(base), nil
 	}
+	// upload-only and no-delete are independent and may be combined, so stack the
+	// wrappers rather than picking one branch. no-delete goes on first so an
+	// upload-only STOR that truncates an existing file is still caught by it.
+	var fs afero.Fs = base
 	if d.srv.NoDelete {
-		return &noDeleteFs{Fs: base}, nil
+		fs = &noDeleteFs{Fs: fs}
 	}
-	return base, nil
+	if d.srv.UploadOnly {
+		fs = &uploadOnlyFs{Fs: fs}
+	}
+	return fs, nil
 }
 
 func (d *mainDriver) GetTLSConfig() (*tls.Config, error) {
 	return nil, nil
 }
 
-// noDeleteFs wraps afero.Fs and blocks remove operations.
+// noDeleteFs wraps afero.Fs and blocks any operation that would destroy an
+// existing file's contents. Removing is not the only way to lose a file: a
+// rename moves it away from its path, and opening it O_TRUNC (or Create) rewrites
+// it from empty, so those are blocked too. This mirrors the WebDAV guard in
+// httpserver/webdav_acl.go, which already treats MOVE and overwriting PUT/COPY
+// as deletions. Creating new files and appending (which preserve existing
+// content) stay allowed.
 type noDeleteFs struct {
 	afero.Fs
 }
@@ -143,6 +159,54 @@ func (fs *noDeleteFs) Remove(name string) error {
 
 func (fs *noDeleteFs) RemoveAll(path string) error {
 	return fmt.Errorf("delete not allowed")
+}
+
+func (fs *noDeleteFs) Rename(oldname, newname string) error {
+	return fmt.Errorf("rename not allowed in no-delete mode")
+}
+
+func (fs *noDeleteFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	// A truncating write over an existing file destroys its contents. Appends
+	// (O_APPEND without O_TRUNC) and writes to new files are fine.
+	if flag&(os.O_WRONLY|os.O_RDWR) != 0 && flag&os.O_TRUNC != 0 {
+		if exists, _ := afero.Exists(fs.Fs, name); exists {
+			return nil, fmt.Errorf("overwrite not allowed in no-delete mode")
+		}
+	}
+	return fs.Fs.OpenFile(name, flag, perm)
+}
+
+func (fs *noDeleteFs) Create(name string) (afero.File, error) {
+	// Create implies O_TRUNC, so it would wipe an existing file.
+	if exists, _ := afero.Exists(fs.Fs, name); exists {
+		return nil, fmt.Errorf("overwrite not allowed in no-delete mode")
+	}
+	return fs.Fs.Create(name)
+}
+
+// uploadOnlyFs wraps afero.Fs so clients can write (STOR) and list directories
+// but never read a file back (RETR). ftpserverlib downloads a file via
+// OpenFile(..., O_RDONLY) and lists a directory via Open, so reads are denied at
+// both entry points while directory listing is preserved.
+type uploadOnlyFs struct {
+	afero.Fs
+}
+
+func (fs *uploadOnlyFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	// O_RDONLY is 0, so a read open has neither O_WRONLY nor O_RDWR set.
+	if flag&(os.O_WRONLY|os.O_RDWR) == 0 {
+		return nil, fmt.Errorf("download not allowed in upload-only mode")
+	}
+	return fs.Fs.OpenFile(name, flag, perm)
+}
+
+func (fs *uploadOnlyFs) Open(name string) (afero.File, error) {
+	// Open is used by the driver for directory listing; permit directories but
+	// block opening a regular file for reading.
+	if info, err := fs.Fs.Stat(name); err == nil && !info.IsDir() {
+		return nil, fmt.Errorf("download not allowed in upload-only mode")
+	}
+	return fs.Fs.Open(name)
 }
 
 func isAllowedIP(addr net.Addr, wl *httpserver.Whitelist) bool {
