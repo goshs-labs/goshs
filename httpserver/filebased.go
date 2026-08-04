@@ -49,21 +49,37 @@ func (fs *FileServer) findSpecialFile(folder string) (configFile, error) {
 	return config, nil
 }
 
-// findEffectiveACL walks up the directory tree from dir toward the webroot,
-// returning the nearest configFile found. This allows a .goshs placed in a
-// parent directory to apply recursively to all subdirectories without
-// leaking upward past the webroot.
+// findEffectiveACL walks up the directory tree from dir toward the webroot and
+// MERGES every .goshs it finds into a single effective ACL, so a .goshs placed
+// in a parent directory applies recursively to all subdirectories.
+//
+// The merge is deliberate and security-critical (GHSA-cfhc-8j7j-54wq): a naive
+// "return the nearest non-empty .goshs" walk let a block-only child .goshs
+// ({"block":[...]}, Auth=="") shadow and erase an ancestor's auth requirement,
+// yielding unauthenticated access to the protected subtree. The merge rules are:
+//
+//   - Auth: the NEAREST ancestor that sets one wins. A nearer block-only .goshs
+//     must never clear an ancestor's auth, so we fill Auth in exactly once (on
+//     the first non-empty value encountered walking upward) and never overwrite.
+//   - Block: the UNION of every .goshs block list along the walk, so a parent's
+//     block entries keep applying to descendant directories (fail-closed).
+//
+// The walk never leaks upward past the webroot.
 func (fs *FileServer) findEffectiveACL(dir string) (configFile, error) {
 	webroot := filepath.Clean(fs.Webroot)
 	current := filepath.Clean(dir)
 
+	var effective configFile
 	for {
 		config, err := fs.findSpecialFile(current)
 		if err != nil {
 			return configFile{}, err
 		}
-		if config.Auth != "" || len(config.Block) > 0 {
-			return config, nil
+		if effective.Auth == "" && config.Auth != "" {
+			effective.Auth = config.Auth
+		}
+		if len(config.Block) > 0 {
+			effective.Block = append(effective.Block, config.Block...)
 		}
 		// Stop once we have checked the webroot itself
 		if current == webroot {
@@ -77,5 +93,5 @@ func (fs *FileServer) findEffectiveACL(dir string) (configFile, error) {
 		current = parent
 	}
 
-	return configFile{}, nil
+	return effective, nil
 }

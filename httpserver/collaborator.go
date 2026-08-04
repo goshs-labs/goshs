@@ -20,10 +20,18 @@ func (fs *FileServer) emitCollabEvent(r *http.Request, status int) []byte {
 	defer r.Body.Close()
 
 	// Flatten headers into a simple map (join multi-value headers with ", ").
-	// Strip the CSRF token so it is never exposed in the collaborator tab.
+	// Strip sensitive headers so they are never exposed on the collaborator feed:
+	//   - X-Csrf-Token: our own anti-CSRF secret.
+	//   - Authorization: a legitimate write to a .goshs-protected directory
+	//     carries "Authorization: Basic base64(user:pass)". The feed is anonymous
+	//     when no global -b/-P is set, so broadcasting this header would leak the
+	//     per-directory ACL credential to any watcher (GHSA-wfg4-m42q-9pvq).
+	// Stripping here covers every call site unconditionally, including the write
+	// handlers that emit after authenticating.
 	headers := make(map[string]string, len(r.Header))
 	for k, v := range r.Header {
-		if http.CanonicalHeaderKey(k) == "X-Csrf-Token" {
+		switch http.CanonicalHeaderKey(k) {
+		case "X-Csrf-Token", "Authorization":
 			continue
 		}
 		headers[k] = strings.Join(v, ", ")
