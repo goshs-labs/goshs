@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"goshs.de/goshs/v2/catcher"
-	"goshs.de/goshs/v2/clipboard"
+	"goshs.de/goshs/v2/chat"
 	"goshs.de/goshs/v2/options"
 	"goshs.de/goshs/v2/smtpattach"
 )
@@ -285,33 +285,36 @@ func TestExportEmptyPane(t *testing.T) {
 	}
 }
 
-// TestClipboardRefreshNewestFirst verifies the CLIPBOARD pane mirrors the
-// shared clipboard with the newest entry on top.
-func TestClipboardRefreshNewestFirst(t *testing.T) {
-	cb := clipboard.New()
-	_ = cb.AddEntry("first")
-	_ = cb.AddEntry("second")
+// TestChatRefreshOldestFirst verifies the CHAT pane mirrors the shared chat log
+// in order, oldest message first (newest at the bottom).
+func TestChatRefreshOldestFirst(t *testing.T) {
+	ch := chat.New()
+	_, _ = ch.AddEntry("alice", "first")
+	_, _ = ch.AddEntry("bob", "second")
 
-	m := newModel(&options.Options{}, nil, nil, nil, cb, nil, nil)
-	m.refreshClipboard()
+	m := newModel(&options.Options{}, nil, nil, nil, ch, nil, nil)
+	m.refreshChat()
 
-	p := m.panes[paneClipboard]
+	p := m.panes[paneChat]
 	if len(p.rows) != 2 {
-		t.Fatalf("want 2 clipboard rows, got %d", len(p.rows))
+		t.Fatalf("want 2 chat rows, got %d", len(p.rows))
 	}
-	if !strings.Contains(p.rows[0].summary, "second") {
-		t.Fatalf("newest entry should be row 0, got %q", p.rows[0].summary)
+	if !strings.Contains(p.rows[0].summary, "first") {
+		t.Fatalf("oldest message should be row 0, got %q", p.rows[0].summary)
+	}
+	if !strings.Contains(p.rows[1].summary, "second") {
+		t.Fatalf("newest message should be the last row, got %q", p.rows[1].summary)
 	}
 }
 
-// TestClipboardAddViaInput drives the add-entry input mode and checks the entry
-// reaches the shared clipboard and the pane.
-func TestClipboardAddViaInput(t *testing.T) {
-	cb := clipboard.New()
-	m := newModel(&options.Options{}, nil, nil, nil, cb, nil, nil)
-	m.active = paneClipboard
+// TestChatAddViaInput drives the post-message input mode and checks the message
+// reaches the shared chat log (authored by the TUI) and the pane.
+func TestChatAddViaInput(t *testing.T) {
+	ch := chat.New()
+	m := newModel(&options.Options{}, nil, nil, nil, ch, nil, nil)
+	m.active = paneChat
 
-	// "a" opens the input prompt with the clipboard-add submit callback wired.
+	// "a" opens the input prompt with the chat-post submit callback wired.
 	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
 	if !m.inputActive {
 		t.Fatal("expected input mode to open on 'a'")
@@ -328,36 +331,39 @@ func TestClipboardAddViaInput(t *testing.T) {
 	if m.inputActive {
 		t.Fatal("input mode should close on enter")
 	}
-	entries, _ := cb.GetEntries()
-	if len(entries) != 1 || entries[0].Content != "hello world" {
-		t.Fatalf("clipboard not updated as expected: %+v", entries)
+	messages, _ := ch.GetEntries()
+	if len(messages) != 1 || messages[0].Content != "hello world" {
+		t.Fatalf("chat not updated as expected: %+v", messages)
 	}
-	if !strings.Contains(m.panes[paneClipboard].rows[0].summary, "hello world") {
-		t.Fatalf("clipboard pane not refreshed: %q", m.panes[paneClipboard].rows[0].summary)
+	if messages[0].Author == "" {
+		t.Fatalf("chat message should carry a TUI author, got %+v", messages[0])
+	}
+	if !strings.Contains(m.panes[paneChat].rows[0].summary, "hello world") {
+		t.Fatalf("chat pane not refreshed: %q", m.panes[paneChat].rows[0].summary)
 	}
 }
 
-// TestClipboardDeleteAndClear verifies delete-selected and clear-all act on the
-// shared clipboard.
-func TestClipboardDeleteAndClear(t *testing.T) {
-	cb := clipboard.New()
-	_ = cb.AddEntry("a")
-	_ = cb.AddEntry("b")
+// TestChatDeleteAndClear verifies delete-selected and clear-all act on the
+// shared chat log.
+func TestChatDeleteAndClear(t *testing.T) {
+	ch := chat.New()
+	_, _ = ch.AddEntry("alice", "a")
+	_, _ = ch.AddEntry("bob", "b")
 
-	m := newModel(&options.Options{}, nil, nil, nil, cb, nil, nil)
-	m.active = paneClipboard
-	m.refreshClipboard()
+	m := newModel(&options.Options{}, nil, nil, nil, ch, nil, nil)
+	m.active = paneChat
+	m.refreshChat()
 
-	m.panes[paneClipboard].sel = 0 // newest ("b")
-	m.deleteClipboardEntry()
-	entries, _ := cb.GetEntries()
-	if len(entries) != 1 || entries[0].Content != "a" {
-		t.Fatalf("delete-selected wrong result: %+v", entries)
+	m.panes[paneChat].sel = 1 // newest ("b")
+	m.deleteChatEntry()
+	messages, _ := ch.GetEntries()
+	if len(messages) != 1 || messages[0].Content != "a" {
+		t.Fatalf("delete-selected wrong result: %+v", messages)
 	}
 
-	m.clearClipboard()
-	if entries, _ := cb.GetEntries(); len(entries) != 0 {
-		t.Fatalf("clear failed, %d entries left", len(entries))
+	m.clearChat()
+	if messages, _ := ch.GetEntries(); len(messages) != 0 {
+		t.Fatalf("clear failed, %d messages left", len(messages))
 	}
 }
 

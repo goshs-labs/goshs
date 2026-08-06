@@ -1143,17 +1143,64 @@ export function renderSMTP() {
 }
 
 // ── lightbox ──
+// A zoomable/pannable image modal. Scroll to zoom, drag to pan when zoomed,
+// double-click to toggle zoom, click the backdrop or press Esc to close.
+function closeLightbox() {
+  const lb = document.getElementById("goshs-lightbox");
+  if (lb) lb.classList.remove("open");
+}
+
 export function openLightbox(src) {
   let lb = document.getElementById("goshs-lightbox");
   if (!lb) {
     lb = document.createElement("div");
     lb.id = "goshs-lightbox";
     lb.className = "lightbox";
-    lb.innerHTML = '<img id="goshs-lb-img">';
-    lb.onclick = () => lb.classList.remove("open");
+    lb.innerHTML = '<img id="goshs-lb-img" alt="preview">';
     document.body.appendChild(lb);
+
+    const img = lb.querySelector("#goshs-lb-img");
+    let scale = 1, tx = 0, ty = 0, dragging = false, sx = 0, sy = 0;
+    const apply = () => {
+      img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+      img.style.cursor = scale > 1 ? (dragging ? "grabbing" : "grab") : "zoom-in";
+    };
+    const reset = () => { scale = 1; tx = 0; ty = 0; dragging = false; apply(); };
+    lb._reset = reset;
+
+    // Backdrop click closes; clicks on the image do not.
+    lb.addEventListener("mousedown", (e) => { if (e.target === lb) closeLightbox(); });
+
+    lb.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      scale = Math.min(8, Math.max(1, scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      if (scale === 1) { tx = 0; ty = 0; }
+      apply();
+    }, { passive: false });
+
+    img.addEventListener("mousedown", (e) => {
+      if (scale <= 1) return;
+      e.preventDefault();
+      dragging = true; sx = e.clientX - tx; sy = e.clientY - ty; apply();
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      tx = e.clientX - sx; ty = e.clientY - sy; apply();
+    });
+    window.addEventListener("mouseup", () => { if (dragging) { dragging = false; apply(); } });
+
+    img.addEventListener("dblclick", (e) => {
+      e.preventDefault();
+      if (scale > 1) reset();
+      else { scale = 2.5; apply(); }
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && lb.classList.contains("open")) closeLightbox();
+    });
   }
   document.getElementById("goshs-lb-img").src = src;
+  if (lb._reset) lb._reset();
   lb.classList.add("open");
 }
 

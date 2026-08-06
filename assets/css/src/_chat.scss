@@ -1,0 +1,462 @@
+@use 'mixins' as *;
+
+/* ══════════════════════════════════
+   CHAT PANEL
+   ══════════════════════════════════ */
+.chat-layout {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+.chat-messages {
+    @include panel-scroll;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.chat-msg {
+    @include card-base;
+}
+.chat-msg-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+}
+.chat-msg-author {
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--accent);
+}
+.chat-msg-ts {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text2);
+}
+.chat-msg-edited {
+    font-size: 10px;
+    color: var(--text2);
+    font-style: italic;
+}
+.chat-msg-actions {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+}
+/* The message being edited in place is highlighted while its text sits in the composer. */
+.chat-msg.editing {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+/* Your own messages get an accent left bar and a subtle tint so they're easy to
+   pick out from the rest of the conversation. */
+.chat-msg.own {
+    border-left: 3px solid var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.chat-msg.own .chat-msg-header {
+    border-bottom-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+.chat-msg-body {
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--text1);
+    line-height: 1.6;
+    word-break: break-word;
+    overflow-x: auto;
+}
+/* Markdown rendering inside a message */
+.chat-msg-body > *:first-child { margin-top: 0; }
+.chat-msg-body > *:last-child { margin-bottom: 0; }
+.chat-msg-body p { margin: 0 0 8px; }
+.chat-msg-body code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--bg3);
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+.chat-msg-body pre {
+    background: var(--bg3);
+    padding: 10px 12px;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 0 0 8px;
+}
+.chat-msg-body pre code {
+    background: none;
+    padding: 0;
+    line-height: 1.5;
+}
+/* Long code blocks (> ~10 lines) are collapsed behind a Show more/less toggle so
+   a big listing doesn't dominate the chat column. */
+.chat-code {
+    margin: 0 0 8px;
+}
+.chat-code pre {
+    margin: 0;
+}
+.chat-code.collapsed pre {
+    max-height: 16.5em; /* ~10 lines of 12px/1.5 mono + padding */
+    overflow: hidden;
+    position: relative;
+}
+.chat-code.collapsed pre::after {
+    /* Fade the clipped bottom edge so it reads as "there's more". */
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 36px;
+    background: linear-gradient(transparent, var(--bg3));
+    pointer-events: none;
+}
+.chat-code-toggle {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 2px 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+}
+.chat-code-toggle:hover {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.chat-msg-body blockquote {
+    margin: 0 0 8px;
+    padding-left: 10px;
+    border-left: 3px solid var(--border);
+    color: var(--text2);
+}
+.chat-msg-body ul,
+.chat-msg-body ol {
+    margin: 0 0 8px;
+    padding-left: 20px;
+}
+.chat-msg-body a {
+    color: var(--accent);
+}
+/* Pasted / linked images render as a compact thumbnail; click opens the zoomable
+   lightbox. Capped so a large screenshot never blows out the chat column. */
+.chat-msg-body img {
+    max-width: 100%;
+    max-height: 200px;
+    width: auto;
+    height: auto;
+    border-radius: 4px;
+    margin: 4px 0;
+    border: 1px solid var(--border);
+    cursor: zoom-in;
+    vertical-align: bottom;
+    transition: filter 0.12s ease;
+}
+.chat-msg-body img:hover {
+    filter: brightness(1.06);
+}
+/* Reactions bar under a message. The quick-react picker is always a child (but
+   absolutely positioned), so it never counts toward the bar's height; vertical
+   padding is only added once there are real reaction chips (.has-reactions). */
+.chat-msg-reactions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    padding: 0 12px;
+    position: relative;
+}
+.chat-msg-reactions.has-reactions {
+    padding-bottom: 8px;
+}
+.chat-reaction {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 7px;
+    font-size: 12px;
+    line-height: 1.6;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    background: var(--bg3);
+    color: var(--text1);
+    cursor: pointer;
+}
+.chat-reaction:hover {
+    border-color: var(--accent);
+}
+.chat-reaction.active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.chat-reaction-count {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text2);
+}
+.chat-reaction.active .chat-reaction-count {
+    color: var(--accent);
+}
+/* Searchable reaction emoji picker (shared popover, positioned via JS). */
+.chat-emoji-picker {
+    position: fixed;
+    z-index: 400;
+    width: 280px;
+    padding: 8px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+.chat-emoji-picker[hidden] {
+    display: none;
+}
+.chat-emoji-search {
+    @include input-base;
+    width: 100%;
+    padding: 6px 10px;
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+.chat-emoji-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 2px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+.chat-emoji-pick {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 1;
+    padding: 0;
+    font-size: 18px;
+    line-height: 1;
+    background: none;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.chat-emoji-pick:hover {
+    background: var(--bg3);
+}
+.chat-emoji-none {
+    grid-column: 1 / -1;
+    padding: 12px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text2);
+}
+.chat-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 10px;
+    color: var(--text2);
+}
+.chat-empty svg {
+    width: 36px;
+    height: 36px;
+    opacity: 0.3;
+}
+.chat-empty p {
+    font-size: 13px;
+    text-align: center;
+}
+.chat-composer {
+    border-top: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: var(--bg1);
+    flex-shrink: 0;
+}
+.chat-composer-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.chat-editing {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--text2);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+}
+.chat-editing[hidden] {
+    display: none;
+}
+.chat-notify-btn {
+    line-height: 1;
+}
+.chat-notify-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.chat-nick-label {
+    font-size: 12px;
+    color: var(--text2);
+}
+.chat-nick-label b {
+    color: var(--accent);
+}
+.chat-textarea {
+    @include input-base;
+    width: 100%;
+    padding: 8px 12px;
+    resize: none;
+    min-height: 64px;
+    max-height: 160px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.5;
+}
+.chat-textarea::placeholder {
+    color: var(--text2);
+}
+.chat-send-actions {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+}
+
+/* Pasted-image previews shown in the composer before sending. */
+.chat-attachments {
+    display: none;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.chat-attachments.has-attachments {
+    display: flex;
+}
+.chat-attachment {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--bg3);
+}
+.chat-attachment img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.chat-attachment-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 13px;
+    line-height: 1;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.6);
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+}
+.chat-attachment-remove:hover {
+    background: var(--danger, #bf616a);
+}
+
+/* Emoji autosuggest popover anchored above the composer textarea. */
+.chat-input-wrap {
+    position: relative;
+}
+.chat-suggest {
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 0;
+    z-index: 30;
+    min-width: 200px;
+    max-width: 320px;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 4px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+.chat-suggest[hidden] {
+    display: none;
+}
+.chat-suggest-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 4px 8px;
+    font-size: 13px;
+    color: var(--text1);
+    background: none;
+    border: none;
+    border-radius: 5px;
+    text-align: left;
+    cursor: pointer;
+}
+.chat-suggest-item:hover,
+.chat-suggest-item.active {
+    background: var(--bg3);
+}
+.chat-suggest-emoji {
+    font-size: 16px;
+    line-height: 1;
+    width: 20px;
+    text-align: center;
+}
+.chat-suggest-code {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text2);
+}
+
+/* Reaction hover tooltip: names of everyone who reacted with an emoji. */
+.chat-reaction-tip {
+    position: fixed;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 260px;
+    padding: 5px 9px;
+    font-size: 12px;
+    color: var(--text1);
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+}
+.chat-reaction-tip[hidden] {
+    display: none;
+}
+.chat-reaction-tip-emoji {
+    font-size: 15px;
+    line-height: 1;
+}
+.chat-reaction-tip-who {
+    color: var(--text2);
+    word-break: break-word;
+}

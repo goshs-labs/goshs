@@ -18,8 +18,10 @@ import {
 } from "./theme.js";
 import { previewFile } from "./preview.js";
 import {
-  sendClip, copyClip, deleteClip, downloadClipboard, clearClipboard,
-} from "./clipboard.js";
+  sendChat, copyMessage, deleteMessage, downloadChat, setNick,
+  reactMessage, toggleReactionPicker, cancelEdit,
+  openChatUpload, handleChatFile, toggleNotifications,
+} from "./chat.js";
 import {
   shareFile, showQR, showShareQR,
   generateShareLink, deleteShareLink, copyShareUrl,
@@ -43,7 +45,9 @@ Object.assign(window, {
   navigateTo, filterFiles, sortTable, clearSelection,
   downloadSelected, downloadBulk, deleteFile,
   updateBulkBar, startUpload, openUpload, openMkdir, handleFileSelect, createDir, removeUpload,
-  sendClip, copyClip, deleteClip, downloadClipboard, clearClipboard,
+  sendChat, copyMessage, deleteMessage, downloadChat, setNick,
+  reactMessage, toggleReactionPicker, cancelEdit,
+  openChatUpload, handleChatFile, toggleNotifications,
   shareFile, showQR, showShareQR, generateShareLink, deleteShareLink, copyShareUrl,
   openModal, closeModal,
   filterEmbedded, sortEmbedded, copyEmbLink,

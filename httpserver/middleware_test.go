@@ -399,7 +399,7 @@ func TestBasicAuthMiddleware_ConPtyRejectsExtraFeatureKeys(t *testing.T) {
 		"/ConPtyShell.ps1?conpty&goshs-info",
 		"/ConPtyShell.ps1?conpty&ws",
 		"/ConPtyShell.ps1?conpty&catcher-api=list",
-		"/ConPtyShell.ps1?conpty&cbDown",
+		"/ConPtyShell.ps1?conpty&chatDown",
 		"/ConPtyShell.ps1?conpty&embedded",
 	}
 	for _, target := range extras {

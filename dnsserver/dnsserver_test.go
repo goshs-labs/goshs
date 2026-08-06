@@ -7,14 +7,14 @@ import (
 
 	"github.com/miekg/dns"
 	"github.com/stretchr/testify/require"
-	"goshs.de/goshs/v2/clipboard"
+	"goshs.de/goshs/v2/chat"
 	"goshs.de/goshs/v2/options"
 	"goshs.de/goshs/v2/webhook"
 	"goshs.de/goshs/v2/ws"
 )
 
 func newTestServer() *DNSServer {
-	cb := clipboard.New()
+	cb := chat.New()
 	hub := ws.NewHub(cb, false)
 	go hub.Run()
 	wh := webhook.Register(false, "", "discord", []string{})
@@ -28,7 +28,7 @@ func newTestServer() *DNSServer {
 }
 
 func TestNewDNSServer_Fields(t *testing.T) {
-	cb := clipboard.New()
+	cb := chat.New()
 	hub := ws.NewHub(cb, false)
 	go hub.Run()
 	wh := webhook.Register(false, "", "discord", []string{})
@@ -147,7 +147,7 @@ func TestDNSHandler_MultipleQuestions(t *testing.T) {
 
 func TestDNSHandler_ReplyIPFallback(t *testing.T) {
 	// When opts.DNSIP is empty, NewDNSServer should default ReplyIP to "0.0.0.0".
-	cb := clipboard.New()
+	cb := chat.New()
 	hub := ws.NewHub(cb, false)
 	go hub.Run()
 	wh := webhook.Register(false, "", "discord", []string{})

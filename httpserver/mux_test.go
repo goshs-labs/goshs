@@ -15,7 +15,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
-	"goshs.de/goshs/v2/clipboard"
+	"goshs.de/goshs/v2/chat"
 	"goshs.de/goshs/v2/options"
 	"goshs.de/goshs/v2/webhook"
 	"goshs.de/goshs/v2/ws"
@@ -898,13 +898,13 @@ func TestGenerateCSRFToken(t *testing.T) {
 	require.Len(t, token, 64) // 32 bytes hex encoded
 }
 
-// ─── cbDown tests ─────────────────────────────────────────────────────────────
+// ─── chatDown tests ───────────────────────────────────────────────────────────
 
-func TestCbDown_Empty(t *testing.T) {
+func TestChatDown_Empty(t *testing.T) {
 	fs, _ := newTestFileServer(t, t.TempDir())
-	r := httptest.NewRequest(http.MethodGet, "/?cbDown", nil)
+	r := httptest.NewRequest(http.MethodGet, "/?chatDown", nil)
 	w := httptest.NewRecorder()
-	fs.cbDown(w, r)
+	fs.chatDown(w, r)
 	require.Equal(t, http.StatusOK, w.Code)
 }
 
@@ -921,7 +921,7 @@ func TestConstructEmbedded(t *testing.T) {
 // ─── NewHttpServer tests ─────────────────────────────────────────────────────
 
 func TestNewHttpServer(t *testing.T) {
-	cb := clipboard.New()
+	cb := chat.New()
 	hub := ws.NewHub(cb, false)
 	go hub.Run()
 	wh := webhook.Register(false, "", "discord", []string{})
@@ -1034,24 +1034,24 @@ func TestEarlyBreakParameters_EmbeddedInvalid(t *testing.T) {
 	require.True(t, fs.earlyBreakParameters(w, r))
 }
 
-func TestEarlyBreakParameters_CbDown(t *testing.T) {
+func TestEarlyBreakParameters_ChatDown(t *testing.T) {
 	fs, cleanup := newTestFileServer(t, t.TempDir())
 	defer cleanup()
-	r := httptest.NewRequest(http.MethodGet, "/?cbDown", nil)
+	r := httptest.NewRequest(http.MethodGet, "/?chatDown", nil)
 	w := httptest.NewRecorder()
 	require.True(t, fs.earlyBreakParameters(w, r))
 	require.Equal(t, http.StatusOK, w.Code)
 }
 
-func TestEarlyBreakParameters_CbDownNoClipboard(t *testing.T) {
+func TestEarlyBreakParameters_ChatDownNoChat(t *testing.T) {
 	fs, cleanup := newTestFileServer(t, t.TempDir())
 	defer cleanup()
-	fs.NoClipboard = true
-	r := httptest.NewRequest(http.MethodGet, "/?cbDown", nil)
+	fs.NoChat = true
+	r := httptest.NewRequest(http.MethodGet, "/?chatDown", nil)
 	w := httptest.NewRecorder()
-	// When NoClipboard is true, cbDown should not be called
+	// When NoChat is true, chatDown should not be called
 	result := fs.earlyBreakParameters(w, r)
-	// It should still break but not call cbDown - falls through
+	// It should still break but not call chatDown - falls through
 	_ = result
 }
 

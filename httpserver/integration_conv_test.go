@@ -15,7 +15,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
-	"goshs.de/goshs/v2/clipboard"
+	"goshs.de/goshs/v2/chat"
 	"goshs.de/goshs/v2/options"
 	"goshs.de/goshs/v2/webhook"
 	"goshs.de/goshs/v2/ws"
@@ -218,26 +218,26 @@ func TestACL_AuthRequiredDir_BlockedDir(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// ─── NoClipboard tests ───────────────────────────────────────────────────────
+// ─── NoChat tests ────────────────────────────────────────────────────────────
 
-func TestConstructDefault_NoClipboard(t *testing.T) {
+func TestConstructDefault_NoChat(t *testing.T) {
 	dir := t.TempDir()
 	fs, cleanup := newTestFileServer(t, dir)
 	defer cleanup()
 	fs.IP = "127.0.0.1"
 	fs.Port = 8080
-	fs.NoClipboard = true
+	fs.NoChat = true
 
 	w := httptest.NewRecorder()
 	fs.constructDefault(w, "/", nil, nil)
 	require.Equal(t, http.StatusOK, w.Code)
 
-	// The response should not contain clipboard UI elements
+	// The response should not contain the chat UI when disabled
 	body := w.Body.String()
-	require.NotContains(t, body, `id="clipboard"`)
+	require.NotContains(t, body, `id="panel-chat"`)
 }
 
-func TestConstructDefault_WithClipboard(t *testing.T) {
+func TestConstructDefault_WithChat(t *testing.T) {
 	dir := t.TempDir()
 	fs, cleanup := newTestFileServer(t, dir)
 	defer cleanup()
@@ -248,9 +248,37 @@ func TestConstructDefault_WithClipboard(t *testing.T) {
 	fs.constructDefault(w, "/", nil, nil)
 	require.Equal(t, http.StatusOK, w.Code)
 
-	// Should contain clipboard UI elements when not disabled
+	// Should contain the chat UI when not disabled
 	body := w.Body.String()
-	require.Contains(t, body, "clipboard")
+	require.Contains(t, body, `id="panel-chat"`)
+}
+
+func TestConstructDefault_ChatRendersEditedAndReactions(t *testing.T) {
+	dir := t.TempDir()
+	fs, cleanup := newTestFileServer(t, dir)
+	defer cleanup()
+	fs.IP = "127.0.0.1"
+	fs.Port = 8080
+
+	// Seed a message, edit it, and add a reaction, then render the page.
+	m, err := fs.Chat.AddEntry("alice", "helo")
+	require.NoError(t, err)
+	_, err = fs.Chat.EditEntry(m.ID, "hello")
+	require.NoError(t, err)
+	_, err = fs.Chat.React(m.ID, "🔥", "bob")
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	fs.constructDefault(w, "/", nil, nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	body := w.Body.String()
+	// The edited marker and the reactions payload must be server-rendered so a
+	// reloading client sees the same state chat.js renders live.
+	require.Contains(t, body, "(edited)")
+	require.Contains(t, body, `data-reactions=`)
+	require.Contains(t, body, "bob")
+	require.Contains(t, body, "🔥")
 }
 
 // ─── Full flow tests (from TestUnsecureServer) ───────────────────────────────
@@ -476,7 +504,7 @@ func TestLogFile(t *testing.T) {
 	logFile := filepath.Join(tmpDir, "test.log")
 
 	// Just verify LogFile function doesn't panic
-	cb := clipboard.New()
+	cb := chat.New()
 	hub := ws.NewHub(cb, false)
 	go hub.Run()
 	wh := webhook.Register(false, "", "discord", []string{})
@@ -486,7 +514,7 @@ func TestLogFile(t *testing.T) {
 		UploadFolder: tmpDir,
 		CSRFToken:    "test-csrf",
 		Hub:          hub,
-		Clipboard:    cb,
+		Chat:         cb,
 		Webhook:      *wh,
 		SharedLinks:  map[string]SharedLink{},
 		Version:      "test",

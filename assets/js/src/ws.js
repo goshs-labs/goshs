@@ -1,7 +1,7 @@
 // ══ WEBSOCKET ══
 import { ST, updateBadge } from './state.js';
 import { cliOutput } from './cli.js';
-import { onClipboardUpdate } from './clipboard.js';
+import { onChatMessage, onChatEdit, onChatReaction, onChatDelete, onChatClear } from './chat.js';
 import { onCatcherConnection, onCatcherRefresh } from './catcher.js';
 
 let handlers = {};
@@ -36,7 +36,11 @@ export function connectWS() {
     else if (msg.type === "http") handlers.onHTTP(msg);
     else if (msg.type === "smb") handlers.onSMB(msg);
     else if (msg.type === "ldap") handlers.onLDAP(msg);
-    else if (msg.type === "refreshClipboard") onClipboardUpdate(msg);
+    else if (msg.type === "chatMessage") onChatMessage(msg);
+    else if (msg.type === "chatEdit") onChatEdit(msg);
+    else if (msg.type === "chatReaction") onChatReaction(msg);
+    else if (msg.type === "chatDelete") onChatDelete(msg);
+    else if (msg.type === "chatClear") onChatClear(msg);
     else if (msg.type === "reload") location.reload();
     else if (msg.type === "catchup") onCatchup(msg);
     else if (msg.type === "updateCLI") cliOutput(msg);

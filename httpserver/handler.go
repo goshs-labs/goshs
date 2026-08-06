@@ -252,12 +252,12 @@ func (fs *FileServer) earlyBreakParameters(w http.ResponseWriter, req *http.Requ
 		fs.handleCatcherAPI(w, req, apiAction[0])
 		return true
 	}
-	if _, ok := req.URL.Query()["cbDown"]; ok {
+	if _, ok := req.URL.Query()["chatDown"]; ok {
 		if denyForTokenAccess(w, req) {
 			return true
 		}
-		if !fs.NoClipboard && !fs.Invisible {
-			fs.cbDown(w, req)
+		if !fs.NoChat && !fs.Invisible {
+			fs.chatDown(w, req)
 			return true
 		}
 	}
@@ -351,7 +351,7 @@ func (fs *FileServer) earlyBreakParameters(w http.ResponseWriter, req *http.Requ
 
 // handler is the function which actually handles dir or file retrieval
 func (fs *FileServer) handler(w http.ResponseWriter, req *http.Request) {
-	// Early break for /?ws, /?cbDown, /?bulk, /?static, ?embedded, ?share, ?token
+	// Early break for /?ws, /?chatDown, /?bulk, /?static, ?embedded, ?share, ?token
 	if ok := fs.earlyBreakParameters(w, req); ok {
 		return
 	}
@@ -584,13 +584,22 @@ func (fileS *FileServer) constructDefault(w http.ResponseWriter, relpath string,
 		})
 	}
 
-	var clipEntries []ClipEntry
-	entries, _ := fileS.Clipboard.GetEntries()
-	for _, entry := range entries {
-		clipEntries = append(clipEntries, ClipEntry{
-			ID:      entry.ID,
-			Content: entry.Content,
-			Time:    entry.Time,
+	var chatMessages []ChatMessage
+	messages, _ := fileS.Chat.GetEntries()
+	for _, m := range messages {
+		reactionsJSON := ""
+		if len(m.Reactions) > 0 {
+			if b, err := json.Marshal(m.Reactions); err == nil {
+				reactionsJSON = string(b)
+			}
+		}
+		chatMessages = append(chatMessages, ChatMessage{
+			ID:            m.ID,
+			Author:        m.Author,
+			Content:       m.Content,
+			Time:          m.Time,
+			Edited:        m.Edited,
+			ReactionsJSON: reactionsJSON,
 		})
 	}
 
@@ -611,24 +620,26 @@ func (fileS *FileServer) constructDefault(w http.ResponseWriter, relpath string,
 
 	qrcodeRoot := GenerateQRCode(fmt.Sprintf("%s://%s:%d", proto, ip, port))
 	uiData := UIData{
-		GoshsVersion:    fileS.Version,
-		AbsPath:         fileS.Webroot,
-		QRCode:          qrcodeRoot,
-		BreadcrumbParts: breadcrumbParts,
-		Subdirectory:    subdirectory,
-		ReadOnly:        fileS.ReadOnly,
-		UploadOnly:      fileS.UploadOnly,
-		NoClipboard:     fileS.NoClipboard,
-		NoDelete:        fileS.NoDelete,
-		CLI:             fileS.CLI,
-		Embedded:        fileS.Embedded,
-		Catcher:         fileS.Options != nil && fileS.Options.Catcher,
-		Items:           fileItems,
-		EmbeddedItems:   embeddedFiles,
-		Clipboard:       clipEntries,
-		SharedLinks:     fileS.snapshotSharedLinks(),
-		CSRFToken:       fileS.CSRFToken,
-		MaxUpload:       fileS.MaxUpload,
+		GoshsVersion:      fileS.Version,
+		AbsPath:           fileS.Webroot,
+		QRCode:            qrcodeRoot,
+		BreadcrumbParts:   breadcrumbParts,
+		Subdirectory:      subdirectory,
+		ReadOnly:          fileS.ReadOnly,
+		UploadOnly:        fileS.UploadOnly,
+		NoChat:            fileS.NoChat,
+		ChatUpload:        !fileS.NoChat && !fileS.ReadOnly,
+		PersistChatImages: fileS.PersistChatImages && !fileS.ReadOnly,
+		NoDelete:          fileS.NoDelete,
+		CLI:               fileS.CLI,
+		Embedded:          fileS.Embedded,
+		Catcher:           fileS.Options != nil && fileS.Options.Catcher,
+		Items:             fileItems,
+		EmbeddedItems:     embeddedFiles,
+		Chat:              chatMessages,
+		SharedLinks:       fileS.snapshotSharedLinks(),
+		CSRFToken:         fileS.CSRFToken,
+		MaxUpload:         fileS.MaxUpload,
 	}
 	if !fileS.TTLDeadline.IsZero() {
 		uiData.TTLDeadlineUnixMs = fileS.TTLDeadline.UnixMilli()
@@ -649,6 +660,11 @@ func (fileS *FileServer) constructItems(fis []fs.FileInfo, relpath string, acl c
 		if fi.Name() == ".goshs" {
 			logger.Debug(".goshs detected and therefore applying")
 			// Do not add it to items
+			continue
+		}
+		// Hide the chat's on-disk sink (uploads + persisted log) from the
+		// listing; the files remain directly reachable by their link.
+		if fi.Name() == ".goshs-chat" {
 			continue
 		}
 		item := item{}

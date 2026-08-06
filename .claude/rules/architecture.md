@@ -57,7 +57,7 @@ was not called first, so direct callers keep working. Coverage: `httpserver`
 | Reverse-shell catcher + listeners | `catcher/` | Session/listener model; surfaced in Web UI catcher + TUI SHELLS pane |
 | Reverse-shell payload generator | `assets/js/src/catcher.js` (web) + `tui/generator.go` (TUI) | See "Generator" below |
 | OOB callback capture ("HTTP Collaborator") | `assets/js/src/collab.js` | Self-hosted interactsh/requestbin for blind SSRF/RCE/XXE. **Already exists — do not propose building it.** |
-| Shared clipboard (web ↔ TUI) | `clipboard/` | Synced across web clients and the TUI via the ws hub |
+| Team chat (web ↔ TUI) | `chat/` | Live, markdown-rendered (+ emoji) message log. Each web browser picks a nickname (localStorage); the TUI authors as `tui@<host>`. In-memory by default; **`--persist-chat`** writes the full log (messages, edit flags, per-emoji reaction authors, monotonic `nextID`) to `<webroot>/.goshs-chat/chat.json` after every mutation and pre-stages it on restart (`chat.Load`/`save`, `persistState`). Web supports **in-place edit** of your own messages (↑ in the composer recalls/cycles your messages; `editMessage`→`chatEdit`, shows `(edited)`), **emoji reactions** (toggle by nickname; `react`→`chatReaction`; `Reactions map[string][]string` on `chat.Message`, rendered server-side via `ChatMessage.ReactionsJSON`→`data-reactions`; the web chip shows a hover tooltip of who reacted), **full `:shortcode:` emoji set** (the Mattermost catalog minus skin-tone variants — ~1800 emoji / ~2300 shortcodes; `generate.py` drops any `unified` containing a Fitzpatrick modifier 1F3FB–1F3FF, keeping the neutral base — generated from `mattermost/webapp/channels/src/utils/emoji.json` by `assets/emoji/generate.py` into the static asset `httpserver/static/js/emoji.json`, fetched at chat init; `chat.js` keeps a tiny built-in fallback if the fetch fails), with **composer autosuggest** and a **searchable reaction picker** (shared `#chat-emoji-picker`, results capped at 180, search matches aliases), **image paste** (inline base64, or written to disk with `--persist-chat-images`), **file upload** (📎 → `POST /?chatUpload` → `.goshs-chat/`, respects `--read-only`, hidden from the dir listing), **collapsible long code blocks** (>10 lines), **own-message highlight** (`.chat-msg.own` when author == nickname; re-evaluated on nick change via `refreshOwnHighlight`), and **opt-in desktop notifications** (Web Notifications API; 🔕/🔔 toggle in the composer, pref in localStorage `goshs-chat-notify`; `maybeNotify` fires for others' messages when the tab is hidden or chat panel inactive). Synced across web clients and the TUI via the ws hub. Evolved from the former shared clipboard. NB: chat messages can inline base64 images, so `ServeWS` raises the coder/websocket read limit to 16 MiB (`wsReadLimit`; the 32 KiB default silently drops such messages). |
 | Webhooks (notifications) | `webhook/` | Discord provider; `WebhookEvents` filter |
 | Tunneling (public URL) | `tunnel/` | `Tunnel` flag |
 | mDNS advertisement | (MDNS flag) | |
@@ -143,7 +143,7 @@ maintenance), not packaging constraints.
 - **Server→JS data passing:** done via `<meta>` tags injected into the template
   (e.g. TTL countdown), read by JS at load. There is no JSON config endpoint for this.
 - JS modules of note: `catcher.js` (shells + generator), `collab.js` (collaborator),
-  `share.js`, `clipboard.js`, `files.js`, `preview.js`, `ws.js`, `state.js`,
+  `share.js`, `chat.js`, `files.js`, `preview.js`, `ws.js`, `state.js`,
   `modals.js`, `context-menu.js`, `theme.js`, `cli.js`, `globals.js`, `main.js` (entry).
 
 ---
@@ -152,7 +152,7 @@ maintenance), not packaging constraints.
 
 - Entry: `tui.Run(...)` → Bubble Tea model in `tui/tui.go`. 7-pane model with keybinding
   dispatch and tick-based refresh; consumes live events from the ws hub.
-- Panes include EVENTS, SHELLS, CLIPBOARD, and **GENERATOR** (`paneGenerator`).
+- Panes include EVENTS, SHELLS, CHAT (`paneChat`), and **GENERATOR** (`paneGenerator`).
 - Colors use the Nord palette constants (`nord4`, `nord7`, …) — do not hardcode ANSI.
 - **Password reveal popup:** the status bar shows the auth *user* but never the
   password. Pressing **`p`** (in any pane except GENERATOR, where `p` edits LPORT)

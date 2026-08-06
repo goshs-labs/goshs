@@ -5,86 +5,177 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
-	"goshs.de/goshs/v2/clipboard"
+	"goshs.de/goshs/v2/chat"
 )
 
-func TestDispatchReadPump_NewEntry(t *testing.T) {
-	mockClipboard := &clipboard.Clipboard{}
+func TestDispatchReadPump_NewMessage(t *testing.T) {
+	mockChat := &chat.Chat{}
 
-	hub := &Hub{cb: mockClipboard, Broadcast: make(chan []byte, 1)}
+	hub := &Hub{chat: mockChat, Broadcast: make(chan []byte, 1)}
 	client := &Client{hub: hub}
 
-	entry := `"my clipboard entry"`
-	packet := Packet{Type: "newEntry", Content: json.RawMessage(entry)}
+	packet := Packet{Type: "newMessage", Content: json.RawMessage(`{"author":"alice","content":"hello"}`)}
 
 	client.dispatchReadPump(packet)
-	// Assert that hub.cb.AddEntry was called, use mockClipboard to verify
-}
-
-func TestDispatchReadPump_DelEntry(t *testing.T) {
-	cb := &clipboard.Clipboard{}
-	err := cb.AddEntry("test")
-	if err != nil {
-		t.Fatalf("Failed to add entry: %v", err)
-	}
-	hub := &Hub{cb: cb, Broadcast: make(chan []byte, 1)}
-	client := &Client{hub: hub}
-
-	idStr := `"0"` // JSON string
-	packet := Packet{Type: "delEntry", Content: json.RawMessage(idStr)}
-
-	client.dispatchReadPump(packet)
-}
-
-func TestDispatchReadPump_DelEntryInvalidID(t *testing.T) {
-	cb := &clipboard.Clipboard{}
-	err := cb.AddEntry("test")
-	if err != nil {
-		t.Fatalf("Failed to add entry: %v", err)
-	}
-	hub := &Hub{cb: cb, Broadcast: make(chan []byte, 1)}
-	client := &Client{hub: hub}
-
-	idStr := `0` // JSON string
-	packet := Packet{Type: "delEntry", Content: json.RawMessage(idStr)}
-
-	client.dispatchReadPump(packet)
-}
-
-func TestRefreshClipboard(t *testing.T) {
-	hub := &Hub{Broadcast: make(chan []byte, 1)}
-	client := &Client{hub: hub}
-
-	client.refreshClipboard()
 
 	select {
 	case msg := <-hub.Broadcast:
-		var pkt SendPacket
-		err := json.Unmarshal(msg, &pkt)
-		require.NoError(t, err)
-		require.Equal(t, "refreshClipboard", pkt.Type)
+		var pkt struct {
+			Type    string `json:"type"`
+			Author  string `json:"author"`
+			Content string `json:"content"`
+		}
+		require.NoError(t, json.Unmarshal(msg, &pkt))
+		require.Equal(t, "chatMessage", pkt.Type)
+		require.Equal(t, "alice", pkt.Author)
+		require.Equal(t, "hello", pkt.Content)
 	default:
 		t.Fatal("no message Broadcasted")
 	}
 }
 
-func TestDispatchReadPump_ClearClipboard(t *testing.T) {
-	cb := &clipboard.Clipboard{}
-	hub := &Hub{cb: cb, Broadcast: make(chan []byte, 1)}
+func TestDispatchReadPump_DelMessage(t *testing.T) {
+	ch := &chat.Chat{}
+	if _, err := ch.AddEntry("alice", "test"); err != nil {
+		t.Fatalf("Failed to add message: %v", err)
+	}
+	hub := &Hub{chat: ch, Broadcast: make(chan []byte, 1)}
 	client := &Client{hub: hub}
 
-	packet := Packet{Type: "clearClipboard", Content: json.RawMessage(`""`)}
+	packet := Packet{Type: "delMessage", Content: json.RawMessage(`0`)}
 
 	client.dispatchReadPump(packet)
+
+	select {
+	case msg := <-hub.Broadcast:
+		var pkt struct {
+			Type string `json:"type"`
+			ID   int    `json:"id"`
+		}
+		require.NoError(t, json.Unmarshal(msg, &pkt))
+		require.Equal(t, "chatDelete", pkt.Type)
+		require.Equal(t, 0, pkt.ID)
+	default:
+		t.Fatal("no message Broadcasted")
+	}
+}
+
+func TestDispatchReadPump_DelMessageInvalidID(t *testing.T) {
+	ch := &chat.Chat{}
+	if _, err := ch.AddEntry("alice", "test"); err != nil {
+		t.Fatalf("Failed to add message: %v", err)
+	}
+	hub := &Hub{chat: ch, Broadcast: make(chan []byte, 1)}
+	client := &Client{hub: hub}
+
+	// ID 5 does not exist — delete fails, nothing is broadcast.
+	packet := Packet{Type: "delMessage", Content: json.RawMessage(`5`)}
+
+	client.dispatchReadPump(packet)
+
+	select {
+	case <-hub.Broadcast:
+		t.Fatal("delete of an invalid ID must not broadcast")
+	default:
+	}
+}
+
+func TestDispatchReadPump_EditMessage(t *testing.T) {
+	ch := &chat.Chat{}
+	ch.AddEntry("alice", "helo") // gets ID 0
+	hub := &Hub{chat: ch, Broadcast: make(chan []byte, 1)}
+	client := &Client{hub: hub}
+
+	packet := Packet{Type: "editMessage", Content: json.RawMessage(`{"id":0,"content":"hello"}`)}
+	client.dispatchReadPump(packet)
+
+	select {
+	case msg := <-hub.Broadcast:
+		var pkt struct {
+			Type    string `json:"type"`
+			ID      int    `json:"id"`
+			Content string `json:"content"`
+			Edited  bool   `json:"edited"`
+		}
+		require.NoError(t, json.Unmarshal(msg, &pkt))
+		require.Equal(t, "chatEdit", pkt.Type)
+		require.Equal(t, "hello", pkt.Content)
+		require.True(t, pkt.Edited)
+	default:
+		t.Fatal("no message Broadcasted")
+	}
+}
+
+func TestDispatchReadPump_React(t *testing.T) {
+	ch := &chat.Chat{}
+	ch.AddEntry("alice", "gg") // gets ID 0
+	hub := &Hub{chat: ch, Broadcast: make(chan []byte, 1)}
+	client := &Client{hub: hub}
+
+	packet := Packet{Type: "react", Content: json.RawMessage(`{"id":0,"emoji":"🔥","author":"bob"}`)}
+	client.dispatchReadPump(packet)
+
+	select {
+	case msg := <-hub.Broadcast:
+		var pkt struct {
+			Type      string              `json:"type"`
+			Reactions map[string][]string `json:"reactions"`
+		}
+		require.NoError(t, json.Unmarshal(msg, &pkt))
+		require.Equal(t, "chatReaction", pkt.Type)
+		require.Equal(t, []string{"bob"}, pkt.Reactions["🔥"])
+	default:
+		t.Fatal("no message Broadcasted")
+	}
+}
+
+func TestDispatchReadPump_ReactInvalidEmoji(t *testing.T) {
+	ch := &chat.Chat{}
+	ch.AddEntry("alice", "gg") // gets ID 0
+	hub := &Hub{chat: ch, Broadcast: make(chan []byte, 1)}
+	client := &Client{hub: hub}
+
+	// An oversized "emoji" must be rejected before it is stored/broadcast.
+	packet := Packet{Type: "react", Content: json.RawMessage(`{"id":0,"emoji":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","author":"bob"}`)}
+	client.dispatchReadPump(packet)
+
+	select {
+	case <-hub.Broadcast:
+		t.Fatal("oversized reaction must not broadcast")
+	default:
+	}
+}
+
+func TestDispatchReadPump_ClearChat(t *testing.T) {
+	ch := &chat.Chat{}
+	hub := &Hub{chat: ch, Broadcast: make(chan []byte, 1)}
+	client := &Client{hub: hub}
+
+	packet := Packet{Type: "clearChat", Content: json.RawMessage(`""`)}
+
+	client.dispatchReadPump(packet)
+
+	select {
+	case msg := <-hub.Broadcast:
+		var pkt struct {
+			Type string `json:"type"`
+		}
+		require.NoError(t, json.Unmarshal(msg, &pkt))
+		require.Equal(t, "chatClear", pkt.Type)
+	default:
+		t.Fatal("no message Broadcasted")
+	}
 }
 
 func TestDispatchReadPump_Command(t *testing.T) {
-	hub := &Hub{cliEnabled: true, cb: &clipboard.Clipboard{}, Broadcast: make(chan []byte, 1)}
+	hub := &Hub{cliEnabled: true, chat: &chat.Chat{}, Broadcast: make(chan []byte, 1)}
 	client := &Client{hub: hub}
 
 	cmdStr := `"ls -la"`
@@ -94,7 +185,7 @@ func TestDispatchReadPump_Command(t *testing.T) {
 }
 
 func TestInvalidEventSent(t *testing.T) {
-	hub := &Hub{cliEnabled: true, cb: &clipboard.Clipboard{}, Broadcast: make(chan []byte, 1)}
+	hub := &Hub{cliEnabled: true, chat: &chat.Chat{}, Broadcast: make(chan []byte, 1)}
 	client := &Client{hub: hub}
 
 	packet := Packet{Type: "invalid", Content: json.RawMessage(`""`)}
@@ -103,7 +194,7 @@ func TestInvalidEventSent(t *testing.T) {
 }
 
 func TestDispatchReadPump_ClearHTTP(t *testing.T) {
-	hub := NewHub(&clipboard.Clipboard{}, false)
+	hub := NewHub(&chat.Chat{}, false)
 	hub.HTTPLog.Add([]byte(`{"type":"http"}`))
 	client := &Client{hub: hub}
 
@@ -112,7 +203,7 @@ func TestDispatchReadPump_ClearHTTP(t *testing.T) {
 }
 
 func TestDispatchReadPump_ClearDNS(t *testing.T) {
-	hub := NewHub(&clipboard.Clipboard{}, false)
+	hub := NewHub(&chat.Chat{}, false)
 	hub.DNSLog.Add([]byte(`{"type":"dns"}`))
 	client := &Client{hub: hub}
 
@@ -121,7 +212,7 @@ func TestDispatchReadPump_ClearDNS(t *testing.T) {
 }
 
 func TestDispatchReadPump_ClearSMTP(t *testing.T) {
-	hub := NewHub(&clipboard.Clipboard{}, false)
+	hub := NewHub(&chat.Chat{}, false)
 	hub.SMTPLog.Add([]byte(`{"type":"smtp"}`))
 	client := &Client{hub: hub}
 
@@ -130,7 +221,7 @@ func TestDispatchReadPump_ClearSMTP(t *testing.T) {
 }
 
 func TestDispatchReadPump_ClearSMB(t *testing.T) {
-	hub := NewHub(&clipboard.Clipboard{}, false)
+	hub := NewHub(&chat.Chat{}, false)
 	hub.SMBLog.Add([]byte(`{"type":"smb"}`))
 	client := &Client{hub: hub}
 
@@ -138,7 +229,7 @@ func TestDispatchReadPump_ClearSMB(t *testing.T) {
 	require.Equal(t, 0, len(hub.SMBLog.Last(10)))
 }
 func TestHub_Run(t *testing.T) {
-	cb := &clipboard.Clipboard{} // Use a mock or real instance as needed
+	cb := &chat.Chat{} // Use a mock or real instance as needed
 	hub := NewHub(cb, false)
 
 	go hub.Run()
@@ -196,7 +287,7 @@ func TestHub_Run(t *testing.T) {
 }
 
 func TestHub_Run_BroadcastClientSendFull(t *testing.T) {
-	cb := &clipboard.Clipboard{}
+	cb := &chat.Chat{}
 	hub := NewHub(cb, false)
 
 	go hub.Run()
@@ -254,11 +345,11 @@ func (m *mockConn) Close(code websocket.StatusCode, reason string) error {
 }
 
 func TestClient_readPump_CloseCalled(t *testing.T) {
-	hub := NewHub(&clipboard.Clipboard{}, false)
+	hub := NewHub(&chat.Chat{}, false)
 	hub.unregister = make(chan *Client, 1) // buffered
 
 	validPacket := Packet{
-		Type:    "clearClipboard",
+		Type:    "clearChat",
 		Content: json.RawMessage(`null`),
 	}
 	validPacketJSON, _ := json.Marshal(validPacket)
@@ -341,8 +432,8 @@ func TestClient_writePump(t *testing.T) {
 }
 
 func TestServeWS(t *testing.T) {
-	// Create a Hub instance with mock clipboard
-	cb := &clipboard.Clipboard{}
+	// Create a Hub instance with mock chat
+	cb := &chat.Chat{}
 	hub := NewHub(cb, false)
 
 	// Start the hub's Run loop in a goroutine
@@ -371,4 +462,186 @@ func TestServeWS(t *testing.T) {
 	if len(hub.clients) != 1 {
 		t.Fatalf("expected 1 client registered, got %d", len(hub.clients))
 	}
+}
+
+// TestServeWS_ChatRoundTrip exercises the full wire contract the web UI relies
+// on: a browser sends a newMessage packet, the server stores it and broadcasts a
+// concrete chatMessage event back with id/author/content/time. This guards the
+// JSON shapes and (case-insensitive) field names shared with assets/js/src/chat.js.
+func TestServeWS_ChatRoundTrip(t *testing.T) {
+	ch := chat.New()
+	hub := NewHub(ch, false)
+	go hub.Run()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ServeWS(hub, w, r)
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + server.URL[len("http"):]
+	conn, _, err := websocket.Dial(context.Background(), wsURL, nil)
+	if err != nil {
+		t.Fatalf("websocket dial failed: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	// Send a newMessage exactly as the browser does (lowercase keys).
+	out := []byte(`{"type":"newMessage","content":{"author":"alice","content":"hi **there**"}}`)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := conn.Write(ctx, websocket.MessageText, out); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	// Read until we see the chatMessage broadcast (skip the initial catchup).
+	var got struct {
+		Type    string `json:"type"`
+		ID      int    `json:"id"`
+		Author  string `json:"author"`
+		Content string `json:"content"`
+		Time    string `json:"time"`
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for chatMessage broadcast")
+		}
+		rctx, rcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, data, err := conn.Read(rctx)
+		rcancel()
+		if err != nil {
+			t.Fatalf("read failed: %v", err)
+		}
+		if err := json.Unmarshal(data, &got); err != nil {
+			continue
+		}
+		if got.Type == "chatMessage" {
+			break
+		}
+	}
+
+	require.Equal(t, "alice", got.Author)
+	require.Equal(t, "hi **there**", got.Content)
+	require.NotEmpty(t, got.Time)
+
+	// The message must also be retrievable from the shared store (what the TUI
+	// reads and the /?chatDown export serialises).
+	messages, _ := ch.GetEntries()
+	require.Len(t, messages, 1)
+	require.Equal(t, "alice", messages[0].Author)
+	require.Equal(t, got.ID, messages[0].ID)
+}
+
+// readChatEvent reads ws frames until one with the wanted type arrives (skipping
+// the initial catchup), or fails on timeout.
+func readChatEvent(t *testing.T, conn *websocket.Conn, want string) struct {
+	Type      string              `json:"type"`
+	ID        int                 `json:"id"`
+	Content   string              `json:"content"`
+	Edited    bool                `json:"edited"`
+	Reactions map[string][]string `json:"reactions"`
+} {
+	t.Helper()
+	var got struct {
+		Type      string              `json:"type"`
+		ID        int                 `json:"id"`
+		Content   string              `json:"content"`
+		Edited    bool                `json:"edited"`
+		Reactions map[string][]string `json:"reactions"`
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", want)
+		}
+		rctx, rcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, data, err := conn.Read(rctx)
+		rcancel()
+		if err != nil {
+			t.Fatalf("read failed: %v", err)
+		}
+		if err := json.Unmarshal(data, &got); err != nil {
+			continue
+		}
+		if got.Type == want {
+			return got
+		}
+	}
+}
+
+// TestServeWS_EditAndReactRoundTrip drives the full wire path for the two newer
+// interactions the web UI relies on: reacting to a message and editing it in
+// place. Guards the react/editMessage packet shapes and the chatReaction/chatEdit
+// broadcasts shared with assets/js/src/chat.js.
+func TestServeWS_EditAndReactRoundTrip(t *testing.T) {
+	ch := chat.New()
+	hub := NewHub(ch, false)
+	go hub.Run()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ServeWS(hub, w, r)
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + server.URL[len("http"):]
+	conn, _, err := websocket.Dial(context.Background(), wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	ctx := context.Background()
+	send := func(s string) {
+		wctx, wcancel := context.WithTimeout(ctx, 2*time.Second)
+		defer wcancel()
+		if err := conn.Write(wctx, websocket.MessageText, []byte(s)); err != nil {
+			t.Fatalf("write failed: %v", err)
+		}
+	}
+
+	send(`{"type":"newMessage","content":{"author":"alice","content":"helo"}}`)
+	created := readChatEvent(t, conn, "chatMessage")
+	id := created.ID
+
+	// React.
+	send(`{"type":"react","content":{"id":` + strconv.Itoa(id) + `,"emoji":"🔥","author":"bob"}}`)
+	reacted := readChatEvent(t, conn, "chatReaction")
+	require.Equal(t, []string{"bob"}, reacted.Reactions["🔥"])
+
+	// Edit in place.
+	send(`{"type":"editMessage","content":{"id":` + strconv.Itoa(id) + `,"content":"hello"}}`)
+	edited := readChatEvent(t, conn, "chatEdit")
+	require.Equal(t, "hello", edited.Content)
+	require.True(t, edited.Edited)
+
+	// Store reflects both mutations.
+	messages, _ := ch.GetEntries()
+	require.Len(t, messages, 1)
+	require.Equal(t, "hello", messages[0].Content)
+	require.True(t, messages[0].Edited)
+	require.Equal(t, []string{"bob"}, messages[0].Reactions["🔥"])
+}
+
+// TestDispatchReadPump_Persists proves a message posted over the websocket is
+// written to disk through the same *chat.Chat the hub holds, so a restart with
+// --persist-chat recovers it.
+func TestDispatchReadPump_Persists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".goshs-chat", "chat.json")
+	ch := chat.New()
+	require.NoError(t, ch.Load(path))
+
+	hub := &Hub{chat: ch, Broadcast: make(chan []byte, 4)}
+	client := &Client{hub: hub}
+
+	client.dispatchReadPump(Packet{Type: "newMessage", Content: json.RawMessage(`{"author":"alice","content":"persist me"}`)})
+	client.dispatchReadPump(Packet{Type: "react", Content: json.RawMessage(`{"id":0,"emoji":"🔥","author":"bob"}`)})
+
+	// A fresh Chat loading the same file must see the message and reaction.
+	reloaded := chat.New()
+	require.NoError(t, reloaded.Load(path))
+	msgs, err := reloaded.GetEntries()
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	require.Equal(t, "persist me", msgs[0].Content)
+	require.Equal(t, []string{"bob"}, msgs[0].Reactions["🔥"])
 }

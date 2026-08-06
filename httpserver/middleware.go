@@ -115,7 +115,7 @@ func (fs *FileServer) verifyCredentials(r *http.Request) (authVal string, ok boo
 // auth. The exemption is deliberately narrow: only a GET/HEAD of that exact
 // path carrying `conpty` as its *sole* query parameter qualifies. Any other
 // method (PUT/DELETE/POST) or any additional feature key (`bulk`, `ws`,
-// `goshs-info`, `catcher-api`, `cbDown`, `embedded`, …) would otherwise ride
+// `goshs-info`, `catcher-api`, `chatDown`, `embedded`, …) would otherwise ride
 // the exemption and reach the authenticated API surface anonymously.
 func conPtyExempt(r *http.Request) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {

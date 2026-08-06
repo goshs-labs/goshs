@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"goshs.de/goshs/v2/clipboard"
+	"goshs.de/goshs/v2/chat"
 	"goshs.de/goshs/v2/options"
 	"goshs.de/goshs/v2/webhook"
 	"goshs.de/goshs/v2/ws"
@@ -31,7 +31,7 @@ func TestLogout(t *testing.T) {
 }
 
 func TestData_PlainText(t *testing.T) {
-	cb := clipboard.New()
+	cb := chat.New()
 	hub := ws.NewHub(cb, false)
 	go hub.Run()
 	wh := webhook.Register(false, "", "discord", []string{})
@@ -49,7 +49,7 @@ func TestData_PlainText(t *testing.T) {
 }
 
 func TestData_Multipart(t *testing.T) {
-	cb := clipboard.New()
+	cb := chat.New()
 	hub := ws.NewHub(cb, false)
 	go hub.Run()
 	wh := webhook.Register(false, "", "discord", []string{})
@@ -67,7 +67,7 @@ func TestData_Multipart(t *testing.T) {
 }
 
 func TestData_InvalidMessage(t *testing.T) {
-	cb := clipboard.New()
+	cb := chat.New()
 	hub := ws.NewHub(cb, false)
 	go hub.Run()
 	wh := webhook.Register(false, "", "discord", []string{})
@@ -85,7 +85,7 @@ func TestData_InvalidMessage(t *testing.T) {
 }
 
 func TestNewBackend(t *testing.T) {
-	cb := clipboard.New()
+	cb := chat.New()
 	hub := ws.NewHub(cb, false)
 	wh := webhook.Register(false, "", "discord", []string{})
 	be := &Backend{Hub: hub, WebHook: wh, Domain: "test.com"}
@@ -96,7 +96,7 @@ func TestNewBackend(t *testing.T) {
 }
 
 func TestNewSMTPServer(t *testing.T) {
-	cb := clipboard.New()
+	cb := chat.New()
 	hub := ws.NewHub(cb, false)
 	wh := webhook.Register(false, "", "discord", []string{})
 	opts := &options.Options{

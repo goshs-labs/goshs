@@ -23,3 +23,4 @@ integration.out
 .claude/rules/*
 !.claude/rules/architecture.md
 !.claude/rules/ghfs.md
+.goshs-chat/

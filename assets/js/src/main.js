@@ -5,7 +5,7 @@ import { initTheme } from "./theme.js";
 import { connectWS, registerWSHandlers } from "./ws.js";
 import { initCollab } from "./collab.js";
 import { initFiles } from "./files.js";
-import { initClipboard } from "./clipboard.js";
+import { initChat } from "./chat.js";
 import { initCliHistory } from "./cli.js";
 import { initCatcher } from "./catcher.js";
 import { initContextMenu } from "./context-menu.js";
@@ -22,7 +22,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initTheme();
   initPreview();
   initFiles();
-  initClipboard();
+  initChat();
   initCliHistory();
   initContextMenu();
   initSharedLinks();

@@ -21,13 +21,19 @@ type UIData struct {
 	SharedLinks     map[string]SharedLink
 
 	// Feature flags (controls which tabs/buttons appear)
-	ReadOnly    bool
-	UploadOnly  bool
-	NoClipboard bool
-	NoDelete    bool
-	CLI         bool
-	Embedded    bool
-	Catcher     bool
+	ReadOnly   bool
+	UploadOnly bool
+	NoChat     bool
+	NoDelete   bool
+	CLI        bool
+	Embedded   bool
+	Catcher    bool
+	// ChatUpload is true when chat file upload is available (chat enabled and
+	// the file server is not read-only). Drives the composer's upload button.
+	ChatUpload bool
+	// PersistChatImages is true when pasted images should be uploaded to disk
+	// and linked, instead of inlined as base64 data URLs.
+	PersistChatImages bool
 
 	// File listing
 	Items []FileItem
@@ -35,8 +41,8 @@ type UIData struct {
 	// Embedded files
 	EmbeddedItems []FileItem
 
-	// Clipboard entries (pre-loaded from server state)
-	Clipboard []ClipEntry
+	// Chat messages (pre-loaded from server state, oldest first)
+	Chat []ChatMessage
 
 	// CSRF token embedded into the page for JS to read
 	CSRFToken string
@@ -70,11 +76,17 @@ type FileItem struct {
 	Auth       bool
 }
 
-// ClipEntry is a single clipboard entry rendered server-side.
-type ClipEntry struct {
+// ChatMessage is a single chat message rendered server-side.
+type ChatMessage struct {
 	ID      int
+	Author  string
 	Content string
 	Time    string
+	Edited  bool
+	// ReactionsJSON is the reactions map marshalled to JSON (or "" when there
+	// are none). It is emitted into a data-reactions attribute for chat.js to
+	// parse and render, mirroring how the body carries data-raw.
+	ReactionsJSON string
 }
 
 // renderIndex parses and executes the embedded index.html template.
