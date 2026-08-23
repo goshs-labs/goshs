@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -132,6 +133,61 @@ func TestWebdav_ReadOnly_BlocksMoveAndCopy(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, davReq(t, h, "MOVE", "/secret.txt", "/gone.txt", "").Code)
 	require.Equal(t, http.StatusForbidden, davReq(t, h, "COPY", "/secret.txt", "/copy.txt", "").Code)
 	require.Equal(t, "TOP-SECRET", fileContent(t, dir, "secret.txt"))
+}
+
+// lockReq issues a WebDAV LOCK with an exclusive-write lockinfo body.
+func lockReq(t *testing.T, h http.Handler, target string) *httptest.ResponseRecorder {
+	t.Helper()
+	const lockInfo = `<?xml version="1.0" encoding="utf-8"?>
+<D:lockinfo xmlns:D="DAV:">
+  <D:lockscope><D:exclusive/></D:lockscope>
+  <D:locktype><D:write/></D:locktype>
+</D:lockinfo>`
+	r := httptest.NewRequest("LOCK", target, strings.NewReader(lockInfo))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w
+}
+
+// LOCK is a mutating verb: x/net/webdav's handleLock plants a lock-null empty
+// file for an absent path, so --read-only must block it (regression for
+// GHSA-whqg-vqcj-px54). Without the guard the LOCK falls through unenumerated.
+func TestWebdav_ReadOnly_BlocksLock(t *testing.T) {
+	dir := webdavModeTree(t)
+	fs, cleanup := newTestFileServer(t, dir)
+	defer cleanup()
+	fs.ReadOnly = true
+	h := newWebdavTestHandler(fs)
+
+	w := lockReq(t, h, "/newfile.txt")
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.True(t, fileMissing(t, dir, "newfile.txt"), "LOCK must not create a lock-null file under --read-only")
+}
+
+// --upload-only likewise refuses LOCK — a lock-null empty file is not a genuine
+// upload and would let clients plant files.
+func TestWebdav_UploadOnly_BlocksLock(t *testing.T) {
+	dir := webdavModeTree(t)
+	fs, cleanup := newTestFileServer(t, dir)
+	defer cleanup()
+	fs.UploadOnly = true
+	h := newWebdavTestHandler(fs)
+
+	w := lockReq(t, h, "/newfile.txt")
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.True(t, fileMissing(t, dir, "newfile.txt"), "LOCK must not create a lock-null file under --upload-only")
+}
+
+// Control: no mode flags a LOCK works as usual — confirms the new arm does not
+// over-block normal WebDAV clients.
+func TestWebdav_Default_AllowsLock(t *testing.T) {
+	dir := webdavModeTree(t)
+	fs, cleanup := newTestFileServer(t, dir)
+	defer cleanup()
+	h := newWebdavTestHandler(fs)
+
+	w := lockReq(t, h, "/newfile.txt")
+	require.Less(t, w.Code, http.StatusBadRequest, "LOCK should succeed with no mode flags")
 }
 
 // Control: with no mode flags a MOVE works as usual — the source is renamed away

@@ -81,6 +81,17 @@ func (fs *FileServer) webdavGuard(next http.Handler) http.HandlerFunc {
 				http.Error(w, "delete disabled", http.StatusForbidden)
 				return
 			}
+		case "LOCK", "UNLOCK":
+			// LOCK is a mutating verb: golang.org/x/net/webdav's handleLock
+			// creates a "lock-null" empty file when the target path does not
+			// exist, so an unguarded LOCK plants files even under --read-only.
+			// It is not enumerated by the cases above, so without this arm it
+			// falls through and skips every mode check. Refuse it (and its
+			// UNLOCK counterpart) whenever writes are disallowed.
+			if fs.ReadOnly || fs.UploadOnly {
+				http.Error(w, "read-only", http.StatusForbidden)
+				return
+			}
 		case http.MethodGet, http.MethodHead:
 			if fs.UploadOnly {
 				http.Error(w, "upload-only", http.StatusForbidden)

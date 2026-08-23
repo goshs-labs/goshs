@@ -49,7 +49,7 @@ was not called first, so direct callers keep working. Coverage: `httpserver`
 | HTTP(S) file server, upload, listing, preview | `httpserver/` | Core. Templates + static assets embedded (see Assets). Auth, ACL (`.goshs` dirs), bulk zip download. |
 | WebDAV | `httpserver/` (WebDav flag), separate port | `WebDavPort` default 8001 |
 | FTP / SFTP | `ftpserver/`, `sftpserver/` | `FTP`, `FTPSFTPMode`, port 2121 |
-| TFTP (UDP transfer) | `tftpserver/` | `TFTP`, port 69. Hand-rolled, dependency-free (RFC 1350 + blksize/tsize OACK). RRQ download / WRQ upload, octet only, path-traversal-safe, honours whitelist + ReadOnly/UploadOnly. Registered in mDNS (`_tftp._udp`). |
+| TFTP (UDP transfer) | `tftpserver/` | `TFTP`, port 69. Hand-rolled, dependency-free (RFC 1350 + blksize/tsize OACK). RRQ download / WRQ upload, octet only, path-traversal-safe, honours whitelist + ReadOnly/UploadOnly/NoDelete (a WRQ that would truncate an existing file is refused under `--no-delete`/`--upload-only`). Registered in mDNS (`_tftp._udp`). |
 | SMB (rogue/share + NTLM capture) | `smbserver/` | NTLM hash capture, optional wordlist cracking |
 | SMTP (rogue, attachment capture) | `smtpserver/`, `smtpattach/` | port 2525 |
 | DNS (rogue) | `dnsserver/` | port 8053 |
@@ -282,6 +282,20 @@ matching update.
   parent-dir bulk selection bypass nested `.goshs` auth/block.
 - The rogue protocol servers (SMB/LDAP/SMTP/DNS) capture credentials/NTLM by design;
   changes there have real security impact.
+- **`--no-delete` / `--upload-only` mean "no destruction of existing content" across
+  *every* write protocol** — treat overwrite (truncating open), in-place write,
+  truncate/shrink, and rename/move as deletion-class operations and refuse them for
+  pre-existing files. This invariant is enforced per-protocol and must stay in lockstep:
+  HTTP/WebDAV (`updown.go`, `webdav_acl.go` — incl. the `LOCK` verb, which plants
+  lock-null files), FTP (`noDeleteFs`), SFTP (`helper.go`), TFTP (`handleWrite`), and
+  SMB. SMB routes all four of its sinks — WRITE opcode (`handleWrite`), overwrite
+  dispositions + `Truncate` (`handleCreate`/`handleSetInfo`), and `FileRenameInformation`
+  — through `SMBServer.protectExisting(localPath)`, which returns true only when a flag
+  is set **and** the path is not in `newlyCreatedPaths` (so the operator's own
+  create→write→rename upload flow keeps working). When adding a new write path to any
+  protocol, wire this guard or you reopen the GHSA-966r/275v/jx6h/ppvh/2q29/vw29 class.
+  Regression tests: `smbserver/nodelete_test.go`, `tftpserver/tftpserver_test.go`,
+  `httpserver/webdav_modeflags_test.go`, `httpserver/handler_test.go`.
 
 ---
 

@@ -330,6 +330,58 @@ func TestDeleteFile_DotGoshsBlocked(t *testing.T) {
 	require.NoError(t, err, ".goshs should not have been deleted")
 }
 
+// TestDeleteFile_BlockListedRefused verifies a file block-listed by a .goshs
+// ACL cannot be deleted via HTTP DELETE — the read/share/bulk/WebDAV paths all
+// treat it as non-existent, so delete must too (regression for
+// GHSA-ppmc-5w4w-2669, residual of CVE-2026-40189).
+func TestDeleteFile_BlockListedRefused(t *testing.T) {
+	root := t.TempDir()
+	blockedDir := filepath.Join(root, "blocked")
+	require.NoError(t, os.MkdirAll(blockedDir, 0755))
+	secret := filepath.Join(blockedDir, "secret.txt")
+	require.NoError(t, os.WriteFile(secret, []byte("TOP-SECRET"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(blockedDir, ".goshs"), []byte(`{"block":["secret.txt"]}`), 0644))
+
+	fs, cleanup := newTestFileServer(t, root)
+	defer cleanup()
+
+	r := httptest.NewRequest(http.MethodDelete, "/blocked/secret.txt", nil)
+	r.Header.Set("X-CSRF-Token", "test-csrf")
+	w := httptest.NewRecorder()
+
+	fs.deleteFile(w, r)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+	_, err := os.Stat(secret)
+	require.NoError(t, err, "block-listed file must not have been deleted")
+}
+
+// TestDeleteFile_NonBlockedStillDeletable confirms the block-list guard does not
+// break ordinary deletion of a non-blocked sibling in the same directory.
+func TestDeleteFile_NonBlockedStillDeletable(t *testing.T) {
+	root := t.TempDir()
+	blockedDir := filepath.Join(root, "blocked")
+	require.NoError(t, os.MkdirAll(blockedDir, 0755))
+	keep := filepath.Join(blockedDir, "public.txt")
+	require.NoError(t, os.WriteFile(keep, []byte("hello"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(blockedDir, ".goshs"), []byte(`{"block":["secret.txt"]}`), 0644))
+
+	fs, cleanup := newTestFileServer(t, root)
+	defer cleanup()
+
+	r := httptest.NewRequest(http.MethodDelete, "/blocked/public.txt", nil)
+	r.Header.Set("X-CSRF-Token", "test-csrf")
+	w := httptest.NewRecorder()
+
+	fs.deleteFile(w, r)
+
+	// deleteFile does not set an explicit status on success (recorder defaults to
+	// 200); the meaningful signal is that the non-blocked file is gone.
+	require.Equal(t, http.StatusOK, w.Code)
+	_, err := os.Stat(keep)
+	require.True(t, os.IsNotExist(err), "non-blocked file should have been deleted")
+}
+
 // ─── CreateShareHandler edge cases ───────────────────────────────────────────
 
 func TestCreateShareHandler_InvalidExpiresInt(t *testing.T) {
