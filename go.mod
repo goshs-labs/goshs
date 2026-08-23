@@ -8,7 +8,7 @@ require (
 	github.com/charmbracelet/glamour v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/coder/websocket v1.8.15
-	github.com/emersion/go-smtp v0.24.0
+	github.com/emersion/go-smtp v0.25.0
 	github.com/fclairamb/ftpserverlib v0.32.1
 	github.com/gliderlabs/ssh v0.3.8
 	github.com/go-acme/lego/v4 v4.35.2
