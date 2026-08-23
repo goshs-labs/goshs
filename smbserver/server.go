@@ -1077,6 +1077,19 @@ func (s *SMBServer) handleCreate(cs *connState, h *smb2Hdr, buf []byte) []byte {
 		}
 	}
 
+	// NO-DELETE / UPLOAD-ONLY: the overwrite dispositions open an existing file
+	// with os.Create (O_TRUNC), emptying its contents. Treat truncating overwrite
+	// of a pre-existing served file as destruction and refuse it. New files
+	// (statErr != nil) and the operator's own uploads (newlyCreatedPaths) are
+	// unaffected.
+	if statErr == nil && !existing.IsDir() && s.protectExisting(localPath) {
+		switch createDisp {
+		case FILE_OVERWRITE, FILE_OVERWRITE_IF, FILE_SUPERSEDE:
+			logger.Debugf("SMB: CREATE denied (no-delete/upload-only overwrite) %s", localPath)
+			return errResp(h, STATUS_ACCESS_DENIED)
+		}
+	}
+
 	switch createDisp {
 	case FILE_OPEN:
 		if statErr != nil {
@@ -1531,6 +1544,21 @@ func (s *SMBServer) handleRead(cs *connState, h *smb2Hdr, buf []byte) []byte {
 
 // ── SMB2 Write ─────────────────────────────────────────────────────────────
 
+// protectExisting reports whether --no-delete / --upload-only must refuse a
+// content-destroying operation (in-place write, truncate, overwrite, rename)
+// on localPath. Files created earlier in this session (newlyCreatedPaths) are
+// the operator's own uploads and stay writable so Windows' create→write→rename
+// upload flow keeps working; pre-existing served files are protected. When
+// neither flag is set it always returns false, so default behaviour is
+// unchanged.
+func (s *SMBServer) protectExisting(localPath string) bool {
+	if !s.NoDelete && !s.UploadOnly {
+		return false
+	}
+	_, created := s.newlyCreatedPaths.Load(localPath)
+	return !created
+}
+
 func (s *SMBServer) handleWrite(cs *connState, h *smb2Hdr, buf []byte) []byte {
 	if len(buf) < 64+48 {
 		return errResp(h, STATUS_INVALID_PARAMETER)
@@ -1576,6 +1604,15 @@ func (s *SMBServer) handleWrite(cs *connState, h *smb2Hdr, buf []byte) []byte {
 		return resp
 	}
 	if s.ReadOnly {
+		return errResp(h, STATUS_ACCESS_DENIED)
+	}
+
+	// NO-DELETE / UPLOAD-ONLY: an SMB2 WRITE at a client-chosen offset overwrites
+	// the contents of a file in place. Treat in-place modification of a
+	// pre-existing served file as destruction and refuse it; the operator's own
+	// uploads (newlyCreatedPaths) are still streamed via WRITE after CREATE.
+	if s.protectExisting(handle.Path) {
+		logger.Debugf("SMB: WRITE denied (no-delete/upload-only, pre-existing file) %s", handle.Path)
 		return errResp(h, STATUS_ACCESS_DENIED)
 	}
 
@@ -2163,6 +2200,12 @@ func (s *SMBServer) handleSetInfo(cs *connState, h *smb2Hdr, buf []byte) []byte 
 			if len(infoBuf) < 8 || handle.File == nil {
 				return errResp(h, STATUS_INVALID_PARAMETER)
 			}
+			// NO-DELETE / UPLOAD-ONLY: Truncate shrinks a pre-existing file,
+			// destroying content. Refuse it for protected served files.
+			if s.protectExisting(handle.Path) {
+				logger.Debugf("SMB: SET_INFO FileAllocation denied (no-delete/upload-only) %s", handle.Path)
+				return errResp(h, STATUS_ACCESS_DENIED)
+			}
 			allocSize := int64(le64(infoBuf, 0))
 			if err := handle.File.Truncate(allocSize); err != nil {
 				return errResp(h, STATUS_ACCESS_DENIED)
@@ -2187,12 +2230,14 @@ func (s *SMBServer) handleSetInfo(cs *connState, h *smb2Hdr, buf []byte) []byte 
 			}
 
 		case FileRenameInformation:
-			// In upload-only mode, only allow renaming items created in this session.
-			// Windows uses a fresh FILE_OPEN handle for the rename, so we check
-			// newlyCreatedPaths (path map) rather than the handle itself.
-			if s.UploadOnly {
+			// Rename is a deletion-class operation: it moves a file out of its
+			// path (move-as-deletion) and can clobber the destination. Under
+			// --upload-only or --no-delete only allow renaming items created in
+			// this session. Windows uses a fresh FILE_OPEN handle for the rename,
+			// so we check newlyCreatedPaths (path map) rather than the handle.
+			if s.UploadOnly || s.NoDelete {
 				if _, ok := s.newlyCreatedPaths.Load(handle.Path); !ok {
-					logger.Debugf("SMB: SET_INFO FileRename denied (upload-only, pre-existing item) %s", handle.Path)
+					logger.Debugf("SMB: SET_INFO FileRename denied (no-delete/upload-only, pre-existing item) %s", handle.Path)
 					return errResp(h, STATUS_ACCESS_DENIED)
 				}
 			}
@@ -2214,6 +2259,15 @@ func (s *SMBServer) handleSetInfo(cs *connState, h *smb2Hdr, buf []byte) []byte 
 				return errResp(h, STATUS_ACCESS_DENIED)
 			}
 			oldPath := handle.Path
+			// NO-DELETE / UPLOAD-ONLY: os.Rename silently clobbers an existing
+			// destination, destroying that file's contents. Refuse to overwrite a
+			// protected pre-existing destination.
+			if s.protectExisting(newPath) {
+				if _, statErr := os.Stat(newPath); statErr == nil {
+					logger.Debugf("SMB: SET_INFO FileRename denied (no-delete/upload-only, destination exists) %s", newPath)
+					return errResp(h, STATUS_OBJECT_NAME_COLLISION)
+				}
+			}
 			if err := os.Rename(oldPath, newPath); err != nil {
 				return errResp(h, STATUS_ACCESS_DENIED)
 			}
@@ -2226,6 +2280,12 @@ func (s *SMBServer) handleSetInfo(cs *connState, h *smb2Hdr, buf []byte) []byte 
 		case FileEndOfFileInformation:
 			if len(infoBuf) < 8 || handle.File == nil {
 				return errResp(h, STATUS_INVALID_PARAMETER)
+			}
+			// NO-DELETE / UPLOAD-ONLY: setting EOF truncates a pre-existing file,
+			// destroying content. Refuse it for protected served files.
+			if s.protectExisting(handle.Path) {
+				logger.Debugf("SMB: SET_INFO FileEndOfFile denied (no-delete/upload-only) %s", handle.Path)
+				return errResp(h, STATUS_ACCESS_DENIED)
 			}
 			newSize := int64(le64(infoBuf, 0))
 			if err := handle.File.Truncate(newSize); err != nil {

@@ -67,6 +67,7 @@ type TFTPServer struct {
 	UploadRoot string // destination for writes (WRQ): upload folder or webroot
 	ReadOnly   bool
 	UploadOnly bool
+	NoDelete   bool
 	Webhook    webhook.Webhook
 	Whitelist  *httpserver.Whitelist
 
@@ -87,6 +88,7 @@ func NewTFTPServer(opts *options.Options, wl *httpserver.Whitelist, wh webhook.W
 		UploadRoot: uploadRoot,
 		ReadOnly:   opts.ReadOnly,
 		UploadOnly: opts.UploadOnly,
+		NoDelete:   opts.NoDelete,
 		Webhook:    wh,
 		Whitelist:  wl,
 	}
@@ -242,6 +244,19 @@ func (s *TFTPServer) handleWrite(conn *net.UDPConn, client *net.UDPAddr, filenam
 		_, _ = conn.WriteToUDP(buildError(errAccessViolation, "illegal path"), client)
 		logger.Warnf("[TFTP] rejected traversal in WRQ %q from %s", filename, client.IP)
 		return
+	}
+
+	// Enforce --no-delete / --upload-only: os.Create implies O_TRUNC, so a WRQ
+	// for an existing filename would empty (destroy) its contents before any
+	// DATA arrives. Treat overwrite of an existing file as a deletion and refuse
+	// it, mirroring the HTTP/SFTP upload paths. Creating new files stays allowed.
+	if s.NoDelete || s.UploadOnly {
+		if info, statErr := os.Stat(path); statErr == nil && !info.IsDir() {
+			_, _ = conn.WriteToUDP(buildError(errAccessViolation, "overwrite of existing file not allowed"), client)
+			logger.Warnf("[TFTP] rejected overwrite of existing file %q from %s (--no-delete/--upload-only)", filename, client.IP)
+			s.HandleWebhookSend("PUT", filename, client.IP.String(), true)
+			return
+		}
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
