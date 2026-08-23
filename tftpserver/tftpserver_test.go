@@ -268,6 +268,65 @@ func TestWRQRejectedWhenReadOnly(t *testing.T) {
 	}
 }
 
+// TestWRQRejectedWhenNoDeleteOverwrite verifies a WRQ for an existing filename
+// is refused under --no-delete and the original content is preserved (regression
+// for GHSA-2q29-798w-6qcp / GHSA-vw29-46p5-7h7x). os.Create implies O_TRUNC, so
+// without the guard the file would be emptied before the ACK-0 reply.
+func TestWRQRejectedWhenNoDeleteOverwrite(t *testing.T) {
+	root := t.TempDir()
+	existing := filepath.Join(root, "protected.txt")
+	original := []byte("ORIGINAL_PROTECTED_CONTENT")
+	if err := os.WriteFile(existing, original, 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	port := startServer(t, &TFTPServer{Root: root, UploadRoot: root, NoDelete: true, Whitelist: allowAll(t)})
+	c := newClient(t, port)
+
+	c.send(t, wrq("protected.txt"))
+	pkt := c.recv(t)
+	if binary.BigEndian.Uint16(pkt[:2]) != opERROR || binary.BigEndian.Uint16(pkt[2:4]) != errAccessViolation {
+		t.Fatalf("--no-delete should reject WRQ overwrite with access violation, got opcode %d code %d", binary.BigEndian.Uint16(pkt[:2]), binary.BigEndian.Uint16(pkt[2:4]))
+	}
+
+	// The file must be untouched — not truncated by the destructive open.
+	got, err := os.ReadFile(existing)
+	if err != nil {
+		t.Fatalf("existing file must survive: %v", err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("existing file was modified: got %q, want %q", got, original)
+	}
+}
+
+// TestWRQNewFileAllowedWhenNoDelete confirms --no-delete still permits creating
+// a brand-new file: the guard blocks overwrite of existing content only.
+func TestWRQNewFileAllowedWhenNoDelete(t *testing.T) {
+	root := t.TempDir()
+	port := startServer(t, &TFTPServer{Root: root, UploadRoot: root, NoDelete: true, Whitelist: allowAll(t)})
+	c := newClient(t, port)
+
+	want := []byte("fresh upload")
+	c.send(t, wrq("new.bin"))
+	ack := c.recv(t)
+	if binary.BigEndian.Uint16(ack[:2]) != opACK || binary.BigEndian.Uint16(ack[2:4]) != 0 {
+		t.Fatalf("expected ACK 0 for new file under --no-delete, got opcode %d block %d", binary.BigEndian.Uint16(ack[:2]), binary.BigEndian.Uint16(ack[2:4]))
+	}
+	c.send(t, buildData(1, want))
+	if ack := c.recv(t); binary.BigEndian.Uint16(ack[2:4]) != 1 {
+		t.Fatalf("expected ACK 1, got block %d", binary.BigEndian.Uint16(ack[2:4]))
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	got, err := os.ReadFile(filepath.Join(root, "new.bin"))
+	if err != nil {
+		t.Fatalf("new file should have been created under --no-delete: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("new file content mismatch: got %q, want %q", got, want)
+	}
+}
+
 // --- security & whitelist ---------------------------------------------------
 
 func TestRRQPathTraversalRejected(t *testing.T) {

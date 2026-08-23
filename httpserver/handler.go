@@ -892,6 +892,14 @@ func (fs *FileServer) deleteFile(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Enforce the .goshs block list: a block-listed file is treated as
+	// non-existent everywhere else (read, share, bulk, WebDAV), so deleting it
+	// must be refused too. Mirrors the read path's 404 response.
+	if slices.Contains(acl.Block, filepath.Base(deletePath)) {
+		fs.handleError(w, req, fmt.Errorf("open %s: no such file or directory", deletePath), http.StatusNotFound)
+		return
+	}
+
 	err = os.RemoveAll(deletePath)
 	if err != nil {
 		logger.Warnf("error removing %+v", deletePath)
