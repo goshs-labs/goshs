@@ -824,7 +824,7 @@
     font-weight: 700;
 }
 
-/* ── lightbox ── */
+/* ── lightbox (zoomable/pannable) ── */
 .lightbox {
     display: none;
     position: fixed;
@@ -833,6 +833,7 @@
     background: rgba(0, 0, 0, 0.85);
     align-items: center;
     justify-content: center;
+    overflow: hidden;
     cursor: zoom-out;
 }
 .lightbox.open {
@@ -842,6 +843,11 @@
     max-width: 90vw;
     max-height: 90vh;
     border-radius: var(--r);
+    cursor: zoom-in;
+    transform-origin: center center;
+    will-change: transform;
+    user-select: none;
+    -webkit-user-drag: none;
 }
 
 /* ── empty state ── */

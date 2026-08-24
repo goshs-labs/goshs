@@ -47,7 +47,9 @@ type Config struct {
 	WebdavPort          int      `json:"webdav_port"`
 	UploadOnly          bool     `json:"upload_only"`
 	ReadOnly            bool     `json:"read_only"`
-	NoClipboard         bool     `json:"no_clipboard"`
+	NoChat              bool     `json:"no_chat"`
+	PersistChat         bool     `json:"persist_chat"`
+	PersistChatImages   bool     `json:"persist_chat_images"`
 	NoDelete            bool     `json:"no_delete"`
 	Verbose             bool     `json:"verbose"`
 	Silent              bool     `json:"silent"`
@@ -136,7 +138,9 @@ func LoadConfig(opts *options.Options) (*options.Options, error) {
 	opts.WebDavPort = cfg.WebdavPort
 	opts.UploadOnly = cfg.UploadOnly
 	opts.ReadOnly = cfg.ReadOnly
-	opts.NoClipboard = cfg.NoClipboard
+	opts.NoChat = cfg.NoChat
+	opts.PersistChat = cfg.PersistChat
+	opts.PersistChatImages = cfg.PersistChatImages
 	opts.NoDelete = cfg.NoDelete
 	opts.Verbose = cfg.Verbose
 	opts.Silent = cfg.Silent
@@ -214,7 +218,9 @@ func PrintExample() (string, error) {
 		WebdavPort:          8001,
 		UploadOnly:          false,
 		ReadOnly:            false,
-		NoClipboard:         false,
+		NoChat:              false,
+		PersistChat:         false,
+		PersistChatImages:   false,
 		NoDelete:            false,
 		Verbose:             false,
 		Silent:              false,

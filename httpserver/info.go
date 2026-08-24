@@ -34,7 +34,7 @@ func (fs *FileServer) handleInfo(w http.ResponseWriter) {
 			"process-user":      fs.DropUser,
 			"upload-only":       fmt.Sprintf("%t", fs.UploadOnly),
 			"read-only":         fmt.Sprintf("%t", fs.ReadOnly),
-			"no-clipboard":      fmt.Sprintf("%t", fs.NoClipboard),
+			"no-chat":           fmt.Sprintf("%t", fs.NoChat),
 			"no-delete":         fmt.Sprintf("%t", fs.NoDelete),
 			"embedded":          fmt.Sprintf("%t", fs.Embedded),
 			"verbose":           fmt.Sprintf("%t", fs.Verbose),

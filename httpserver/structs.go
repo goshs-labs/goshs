@@ -8,20 +8,20 @@ import (
 	"time"
 
 	"goshs.de/goshs/v2/catcher"
-	"goshs.de/goshs/v2/clipboard"
+	"goshs.de/goshs/v2/chat"
 	"goshs.de/goshs/v2/options"
 	"goshs.de/goshs/v2/webhook"
 	"goshs.de/goshs/v2/ws"
 )
 
 type baseTemplate struct {
-	Clipboard       *clipboard.Clipboard
+	Chat            *chat.Chat
 	GoshsVersion    string
 	Directory       *directory
 	EmbeddedContent *directory
 	CLI             bool
 	Embedded        bool
-	NoClipboard     bool
+	NoChat          bool
 	NoDelete        bool
 	SharedLinks     map[string]SharedLink
 	ReadOnly        bool
@@ -55,54 +55,56 @@ type item struct {
 
 // FileServer holds the fileserver information
 type FileServer struct {
-	IP             string
-	Port           int
-	CLI            bool
-	WebdavPort     int
-	Webroot        string
-	UploadFolder   string
-	SSL            bool
-	SelfSigned     bool
-	LetsEncrypt    bool
-	MyKey          string
-	MyCert         string
-	MyP12          string
-	P12NoPass      bool
-	User           string
-	Pass           string
-	CACert         string
-	DropUser       string
-	Version        string
-	Fingerprint256 string
-	Fingerprint1   string
-	UploadOnly     bool
-	ReadOnly       bool
-	NoClipboard    bool
-	NoDelete       bool
-	Silent         bool
-	Invisible      bool
-	Embedded       bool
-	Verbose        bool
-	Webhook        webhook.Webhook
-	Hub            *ws.Hub
-	Clipboard      *clipboard.Clipboard
-	Whitelist      *Whitelist
-	MaxUpload      int64
-	SharedLinks    map[string]SharedLink
-	Tunnel         bool
-	TunnelURL      string
-	Options        *options.Options
-	CatcherMgr     *catcher.Manager
-	CSRFToken      string
-	TTLDeadline    time.Time            // self-destruct moment; zero when --ttl is unset
-	authCache      map[string]time.Time // expiry time per verified credential
-	authCacheMu    sync.RWMutex
-	authFailures   map[string]*authFailEntry
-	authFailMu     sync.Mutex
-	httpServer     *http.Server
-	sharedLinksMu  sync.RWMutex
-	mux            *CustomMux   // set by Bind, consumed by Start
-	listener       net.Listener // pre-bound by Bind so port errors surface synchronously
+	IP                string
+	Port              int
+	CLI               bool
+	WebdavPort        int
+	Webroot           string
+	UploadFolder      string
+	SSL               bool
+	SelfSigned        bool
+	LetsEncrypt       bool
+	MyKey             string
+	MyCert            string
+	MyP12             string
+	P12NoPass         bool
+	User              string
+	Pass              string
+	CACert            string
+	DropUser          string
+	Version           string
+	Fingerprint256    string
+	Fingerprint1      string
+	UploadOnly        bool
+	ReadOnly          bool
+	NoChat            bool
+	PersistChat       bool
+	PersistChatImages bool
+	NoDelete          bool
+	Silent            bool
+	Invisible         bool
+	Embedded          bool
+	Verbose           bool
+	Webhook           webhook.Webhook
+	Hub               *ws.Hub
+	Chat              *chat.Chat
+	Whitelist         *Whitelist
+	MaxUpload         int64
+	SharedLinks       map[string]SharedLink
+	Tunnel            bool
+	TunnelURL         string
+	Options           *options.Options
+	CatcherMgr        *catcher.Manager
+	CSRFToken         string
+	TTLDeadline       time.Time            // self-destruct moment; zero when --ttl is unset
+	authCache         map[string]time.Time // expiry time per verified credential
+	authCacheMu       sync.RWMutex
+	authFailures      map[string]*authFailEntry
+	authFailMu        sync.Mutex
+	httpServer        *http.Server
+	sharedLinksMu     sync.RWMutex
+	mux               *CustomMux   // set by Bind, consumed by Start
+	listener          net.Listener // pre-bound by Bind so port errors surface synchronously
 }
 
 type authFailEntry struct {

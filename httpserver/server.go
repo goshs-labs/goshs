@@ -22,7 +22,7 @@ import (
 	"golang.org/x/net/webdav"
 	"goshs.de/goshs/v2/ca"
 	"goshs.de/goshs/v2/catcher"
-	"goshs.de/goshs/v2/clipboard"
+	"goshs.de/goshs/v2/chat"
 	"goshs.de/goshs/v2/config"
 	"goshs.de/goshs/v2/goshsversion"
 	"goshs.de/goshs/v2/logger"
@@ -59,45 +59,47 @@ func generateCSRFToken() string {
 	return hex.EncodeToString(b)
 }
 
-func NewHttpServer(opts *options.Options, hub *ws.Hub, clip *clipboard.Clipboard, wl *Whitelist, wh webhook.Webhook) *FileServer {
+func NewHttpServer(opts *options.Options, hub *ws.Hub, ch *chat.Chat, wl *Whitelist, wh webhook.Webhook) *FileServer {
 	fs := &FileServer{
-		IP:           opts.IP,
-		Port:         opts.Port,
-		CLI:          opts.CLI,
-		Webroot:      opts.Webroot,
-		Clipboard:    clip,
-		Hub:          hub,
-		UploadFolder: opts.UploadFolder,
-		SSL:          opts.SSL,
-		SelfSigned:   opts.SelfSigned,
-		LetsEncrypt:  opts.LetsEncrypt,
-		MyCert:       opts.MyCert,
-		MyKey:        opts.MyKey,
-		MyP12:        opts.MyP12,
-		P12NoPass:    opts.P12NoPass,
-		User:         opts.Username,
-		Pass:         opts.Password,
-		CACert:       opts.CertAuth,
-		DropUser:     opts.DropUser,
-		UploadOnly:   opts.UploadOnly,
-		ReadOnly:     opts.ReadOnly,
-		NoClipboard:  opts.NoClipboard,
-		NoDelete:     opts.NoDelete,
-		Silent:       opts.Silent,
-		Invisible:    opts.Invisible,
-		Embedded:     opts.Embedded,
-		Verbose:      opts.Verbose,
-		Tunnel:       opts.Tunnel,
-		Version:      goshsversion.GoshsVersion,
-		MaxUpload:    opts.MaxUploadSize,
-		Options:      opts,
-		CSRFToken:    generateCSRFToken(),
-		authCache:    make(map[string]time.Time),
-		authFailures: make(map[string]*authFailEntry),
+		IP:                opts.IP,
+		Port:              opts.Port,
+		CLI:               opts.CLI,
+		Webroot:           opts.Webroot,
+		Chat:              ch,
+		Hub:               hub,
+		UploadFolder:      opts.UploadFolder,
+		SSL:               opts.SSL,
+		SelfSigned:        opts.SelfSigned,
+		LetsEncrypt:       opts.LetsEncrypt,
+		MyCert:            opts.MyCert,
+		MyKey:             opts.MyKey,
+		MyP12:             opts.MyP12,
+		P12NoPass:         opts.P12NoPass,
+		User:              opts.Username,
+		Pass:              opts.Password,
+		CACert:            opts.CertAuth,
+		DropUser:          opts.DropUser,
+		UploadOnly:        opts.UploadOnly,
+		ReadOnly:          opts.ReadOnly,
+		NoChat:            opts.NoChat,
+		PersistChat:       opts.PersistChat,
+		PersistChatImages: opts.PersistChatImages,
+		NoDelete:          opts.NoDelete,
+		Silent:            opts.Silent,
+		Invisible:         opts.Invisible,
+		Embedded:          opts.Embedded,
+		Verbose:           opts.Verbose,
+		Tunnel:            opts.Tunnel,
+		Version:           goshsversion.GoshsVersion,
+		MaxUpload:         opts.MaxUploadSize,
+		Options:           opts,
+		CSRFToken:         generateCSRFToken(),
+		authCache:         make(map[string]time.Time),
+		authFailures:      make(map[string]*authFailEntry),
 	}
 
 	fs.Hub = hub
-	fs.Clipboard = clip
+	fs.Chat = ch
 	fs.Webhook = wh
 	fs.Whitelist = wl
 	fs.CatcherMgr = catcher.NewManager(hub)
@@ -144,6 +146,18 @@ func (fs *FileServer) SetupMux(mux *CustomMux, what string) string {
 					return
 				}
 				fs.handleCatcherAPI(w, r, action[0])
+				return
+			}
+			if _, ok := r.URL.Query()["chatUpload"]; ok {
+				if denyForTokenAccess(w, r) {
+					return
+				}
+				if !fs.NoChat && !fs.Invisible {
+					fs.chatUpload(w, r)
+				} else {
+					fs.handleError(w, r, fmt.Errorf("chat is disabled"), http.StatusNotFound)
+				}
+				runtime.GC()
 				return
 			}
 			if strings.HasSuffix(r.URL.Path, "/upload") {

@@ -37,7 +37,9 @@ type Options struct {
 	WebDavPort          int               // 8001
 	UploadOnly          bool              // false
 	ReadOnly            bool              // false
-	NoClipboard         bool              // false
+	NoChat              bool              // false
+	PersistChat         bool              // false
+	PersistChatImages   bool              // false
 	NoDelete            bool              // false
 	Verbose             bool              // false
 	Silent              bool              // false
@@ -137,8 +139,12 @@ func Parse() (*Options, bool) {
 	flag.BoolVar(&opts.UploadOnly, "upload-only", false, "upload only")
 	flag.BoolVar(&opts.ReadOnly, "ro", false, "read only")
 	flag.BoolVar(&opts.ReadOnly, "read-only", false, "read only")
-	flag.BoolVar(&opts.NoClipboard, "nc", false, "")
-	flag.BoolVar(&opts.NoClipboard, "no-clipboard", false, "")
+	flag.BoolVar(&opts.NoChat, "nc", false, "")
+	flag.BoolVar(&opts.NoChat, "no-chat", false, "")
+	flag.BoolVar(&opts.PersistChat, "pc", false, "")
+	flag.BoolVar(&opts.PersistChat, "persist-chat", false, "")
+	flag.BoolVar(&opts.PersistChatImages, "pci", false, "")
+	flag.BoolVar(&opts.PersistChatImages, "persist-chat-images", false, "")
 	flag.BoolVar(&opts.NoDelete, "nd", false, "")
 	flag.BoolVar(&opts.NoDelete, "no-delete", false, "")
 	flag.BoolVar(&opts.Verbose, "V", false, "verbose")
@@ -277,7 +283,9 @@ Web server options:
   -uo, --upload-only    Upload only mode, no download possible    (default: false)
   -uf, --upload-folder  Specify a different upload folder         (default: current working path)
   -mu, --max-upload     Maximum upload size in bytes, 0=unlimited (default: 0)
-  -nc, --no-clipboard   Disable the clipboard sharing             (default: false)
+  -nc, --no-chat        Disable the team chat                     (default: false)
+  -pc, --persist-chat   Persist chat to disk (.goshs-chat/)       (default: false)
+  -pci,--persist-chat-images  Write pasted chat images to disk   (default: false)
   -nd, --no-delete      Disable the delete option                 (default: false)
   -si, --silent         Running without dir listing               (default: false)
   -I,  --invisible      Invisible mode                            (default: false)

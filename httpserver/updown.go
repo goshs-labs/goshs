@@ -322,6 +322,11 @@ func (fs *FileServer) bulkDownload(w http.ResponseWriter, req *http.Request) {
 		if filepath.Base(walkPath) == ".goshs" {
 			return nil
 		}
+		// Skip the chat's on-disk sink (uploads + persisted log); it is hidden
+		// from the listing and shouldn't be swept into a bulk archive.
+		if strings.Contains(walkPath, string(os.PathSeparator)+chatDirName+string(os.PathSeparator)) {
+			return nil
+		}
 
 		// Re-enforce the effective ACL for this file's own directory. The
 		// top-level selection was already checked above, but filepath.Walk

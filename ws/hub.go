@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"sync"
 
-	"goshs.de/goshs/v2/clipboard"
+	"goshs.de/goshs/v2/chat"
 )
 
 // Hub maintains the set of active clients and broadcasts messages to the
@@ -34,8 +34,8 @@ type Hub struct {
 	// Mutex
 	mu sync.RWMutex
 
-	// Handle clipboard
-	cb *clipboard.Clipboard
+	// Handle chat
+	chat *chat.Chat
 
 	// CLI Enabled
 	cliEnabled bool
@@ -49,7 +49,7 @@ type Hub struct {
 }
 
 // NewHub will create a new hub
-func NewHub(cb *clipboard.Clipboard, cliEnabled bool) *Hub {
+func NewHub(ch *chat.Chat, cliEnabled bool) *Hub {
 	return &Hub{
 		Broadcast:   make(chan []byte),
 		register:    make(chan *Client),
@@ -58,7 +58,7 @@ func NewHub(cb *clipboard.Clipboard, cliEnabled bool) *Hub {
 		subscribers: make(map[chan []byte]bool),
 		subscribe:   make(chan chan []byte),
 		unsubscribe: make(chan chan []byte),
-		cb:          cb,
+		chat:        ch,
 		cliEnabled:  cliEnabled,
 		HTTPLog:     NewRingBuffer(1000),
 		DNSLog:      NewRingBuffer(1000),

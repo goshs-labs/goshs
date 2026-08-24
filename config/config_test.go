@@ -234,14 +234,14 @@ func TestLoadConfig_TLSFields(t *testing.T) {
 
 func TestLoadConfig_BooleanFlags(t *testing.T) {
 	cfg := Config{
-		ReadOnly:    true,
-		UploadOnly:  false,
-		NoDelete:    true,
-		NoClipboard: true,
-		Invisible:   true,
-		Silent:      true,
-		Verbose:     true,
-		Tunnel:      true,
+		ReadOnly:   true,
+		UploadOnly: false,
+		NoDelete:   true,
+		NoChat:     true,
+		Invisible:  true,
+		Silent:     true,
+		Verbose:    true,
+		Tunnel:     true,
 	}
 	path := writeTempConfig(t, cfg)
 	opts := &options.Options{ConfigFile: path}
@@ -250,7 +250,7 @@ func TestLoadConfig_BooleanFlags(t *testing.T) {
 	require.True(t, result.ReadOnly)
 	require.False(t, result.UploadOnly)
 	require.True(t, result.NoDelete)
-	require.True(t, result.NoClipboard)
+	require.True(t, result.NoChat)
 	require.True(t, result.Invisible)
 	require.True(t, result.Silent)
 	require.True(t, result.Verbose)

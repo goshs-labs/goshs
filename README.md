@@ -69,11 +69,11 @@ For a detailed documentation go to [docs.goshs.de](https://docs.goshs.de)
 | 🔒 **Auth & Security** | Basic auth, certificate auth, TLS (self-signed, Let's Encrypt, custom cert), IP whitelist, file-based ACLs |
 | ⚙️ **Server Modes** | Read-only, upload-only, no-delete, silent, invisible, CLI command execution, TTL self-destruct |
 | 🔗 **Share Links** | Token-based sharing, download limit, time limit |
-| 🎯 **Collaboration / CTF** | DNS server, SMTP server, SMB NTLM hash capture + cracking, LDAP credential capture + NTLM hash cracking (JNDI mode for Log4Shell), redirect endpoint, Rev Shell Catcher + Payload generator |
+| 🎯 **Collaboration / CTF** | Live team chat (markdown, emoji + `:shortcodes:` autosuggest, image paste, file upload, reactions, message edit, optional disk persistence — shared web ↔ TUI), DNS server, SMTP server, SMB NTLM hash capture + cracking, LDAP credential capture + NTLM hash cracking (JNDI mode for Log4Shell), redirect endpoint, Rev Shell Catcher + Payload generator |
 | 🧩 **Payload Templating** | Render `{{.LHOST}}`/`{{.LPORT}}` + custom `--tpl-var` values into served files on demand (`?tpl`) |
 | 🔔 **Integration** | Webhooks, tunnel via localhost.run, config file, JSON API, mDNS |
-| 🖥️ **TUI Dashboard** | Interactive full-screen terminal dashboard; live panes for HTTP, DNS, SMB, LDAP, SMTP, reverse shells and clipboard; attach and upgrade shells from the terminal |
-| 🛠️ **Misc** | Dark/light themes, clipboard, self-update, log output, embed files, drop privileges |
+| 🖥️ **TUI Dashboard** | Interactive full-screen terminal dashboard; live panes for HTTP, DNS, SMB, LDAP, SMTP, reverse shells and team chat; attach and upgrade shells from the terminal |
+| 🛠️ **Misc** | Dark/light themes, team chat, self-update, log output, embed files, drop privileges |
 
 # Installation
 

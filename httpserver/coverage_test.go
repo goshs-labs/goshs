@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"goshs.de/goshs/v2/clipboard"
+	"goshs.de/goshs/v2/chat"
 	"goshs.de/goshs/v2/webhook"
 	"goshs.de/goshs/v2/ws"
 )
@@ -165,7 +165,7 @@ func TestSendFile_ACLAuth_Download(t *testing.T) {
 	require.NoError(t, os.WriteFile(testFile, []byte("download content"), 0644))
 
 	// Create a file server with an in-process hub
-	cb := clipboard.New()
+	cb := chat.New()
 	hub := ws.NewHub(cb, false)
 	go hub.Run()
 	wh := webhook.Register(false, "", "discord", []string{})
@@ -175,7 +175,7 @@ func TestSendFile_ACLAuth_Download(t *testing.T) {
 		UploadFolder: dir,
 		CSRFToken:    "test-csrf",
 		Hub:          hub,
-		Clipboard:    cb,
+		Chat:         cb,
 		Webhook:      *wh,
 		SharedLinks:  map[string]SharedLink{},
 		Version:      "test",

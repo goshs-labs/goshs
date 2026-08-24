@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"goshs.de/goshs/v2/clipboard"
+	"goshs.de/goshs/v2/chat"
 	"goshs.de/goshs/v2/smtpattach"
 	"goshs.de/goshs/v2/webhook"
 	"goshs.de/goshs/v2/ws"
@@ -20,7 +20,7 @@ import (
 // emitCollabEvent does not block. Call cleanup() in a defer to drain the hub.
 func newTestFileServer(t *testing.T, webroot string) (*FileServer, func()) {
 	t.Helper()
-	cb := clipboard.New()
+	cb := chat.New()
 	hub := ws.NewHub(cb, false)
 	go hub.Run()
 
@@ -31,7 +31,7 @@ func newTestFileServer(t *testing.T, webroot string) (*FileServer, func()) {
 		UploadFolder: webroot,
 		CSRFToken:    "test-csrf",
 		Hub:          hub,
-		Clipboard:    cb,
+		Chat:         cb,
 		Webhook:      *wh,
 		SharedLinks:  map[string]SharedLink{},
 		Version:      "test",

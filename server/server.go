@@ -2,9 +2,10 @@ package server
 
 import (
 	"context"
+	"path/filepath"
 
 	"goshs.de/goshs/v2/catcher"
-	"goshs.de/goshs/v2/clipboard"
+	"goshs.de/goshs/v2/chat"
 	"goshs.de/goshs/v2/dnsserver"
 	"goshs.de/goshs/v2/ftpserver"
 	"goshs.de/goshs/v2/httpserver"
@@ -31,15 +32,23 @@ type Servers struct {
 	// connected (or when --tunnel is unset). It is a getter rather than a value
 	// because the URL is assigned asynchronously once the tunnel comes up.
 	TunnelURL func() string
-	// Clipboard is the shared paste-bin so the TUI can read and mutate the same
-	// clipboard the web UI uses.
-	Clipboard *clipboard.Clipboard
+	// Chat is the shared team chat so the TUI can read and mutate the same
+	// message log the web UI uses.
+	Chat *chat.Chat
 }
 
 func StartAll(opts *options.Options) (*Servers, error) {
-	// Init clipboard and hub
-	clip := clipboard.New()
-	hub := ws.NewHub(clip, opts.CLI)
+	// Init chat and hub
+	ch := chat.New()
+	// With --persist-chat the log is written to (and pre-staged from) a hidden
+	// directory inside the served webroot so it survives a restart.
+	if opts.PersistChat && !opts.NoChat {
+		persistPath := filepath.Join(opts.Webroot, ".goshs-chat", "chat.json")
+		if err := ch.Load(persistPath); err != nil {
+			logger.Warnf("could not load persisted chat from %s: %v", persistPath, err)
+		}
+	}
+	hub := ws.NewHub(ch, opts.CLI)
 	go hub.Run()
 
 	// Whitelist and Webhook
@@ -48,7 +57,7 @@ func StartAll(opts *options.Options) (*Servers, error) {
 	// http — bind synchronously so a port conflict is reported to the caller
 	// (and, under --tui, before the dashboard takes over the terminal) instead
 	// of the serving goroutine calling Fatalf behind its back.
-	httpSrv := httpserver.NewHttpServer(opts, hub, clip, wl, *wh)
+	httpSrv := httpserver.NewHttpServer(opts, hub, ch, wl, *wh)
 	if err := httpSrv.Bind("web"); err != nil {
 		return nil, err
 	}
@@ -57,7 +66,7 @@ func StartAll(opts *options.Options) (*Servers, error) {
 	// webdav
 	var webdavSrv *httpserver.FileServer
 	if opts.WebDav {
-		webdavSrv = httpserver.NewHttpServer(opts, hub, clip, wl, *wh)
+		webdavSrv = httpserver.NewHttpServer(opts, hub, ch, wl, *wh)
 		webdavSrv.WebdavPort = opts.WebDavPort
 		if err := webdavSrv.Bind("webdav"); err != nil {
 			return nil, err
@@ -150,7 +159,7 @@ func StartAll(opts *options.Options) (*Servers, error) {
 		Hub:       hub,
 		Catcher:   httpSrv.CatcherMgr,
 		TunnelURL: func() string { return httpSrv.TunnelURL },
-		Clipboard: clip,
+		Chat:      ch,
 	}, nil
 }
 

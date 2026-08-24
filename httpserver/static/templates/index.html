@@ -4,6 +4,11 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <meta name="csrf-token" content="{{.CSRFToken}}" />
+        <meta name="chat-upload" content="{{if .ChatUpload}}true{{end}}" />
+        <meta
+            name="persist-chat-images"
+            content="{{if .PersistChatImages}}true{{end}}"
+        />
         <meta name="max-upload" content="{{.MaxUpload}}" />
         <meta name="ttl-deadline" content="{{.TTLDeadlineUnixMs}}" />
         <title>goshs {{.GoshsVersion}} — {{.AbsPath}}</title>
@@ -90,12 +95,12 @@
                     </svg>
                     <span class="snav-label">Files</span>
                 </button>
-                {{if not .NoClipboard}}
+                {{if not .NoChat}}
                 <button
                     class="snav"
-                    id="nav-clip"
-                    onclick="switchPanel('clipboard', this)"
-                    title="Clipboard"
+                    id="nav-chat"
+                    onclick="switchPanel('chat', this)"
+                    title="Chat"
                 >
                     <svg
                         viewBox="0 0 24 24"
@@ -104,12 +109,11 @@
                         stroke-width="2"
                     >
                         <path
-                            d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"
+                            d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"
                         />
-                        <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
                     </svg>
-                    <span class="snav-label">Clip</span>
-                    <span class="badge" id="clip-badge"></span>
+                    <span class="snav-label">Chat</span>
+                    <span class="badge" id="chat-badge"></span>
                 </button>
                 {{end}}
                 <button
@@ -664,22 +668,59 @@
                     </div>
                 </section>
 
-                <!-- ████ CLIPBOARD PANEL ████ -->
-                {{if not .NoClipboard}}
-                <section class="panel" id="panel-clipboard">
-                    <div class="clipboard-layout">
-                        <div class="clipboard-entries" id="clip-entries">
-                            {{if .Clipboard}} {{range $i, $e := .Clipboard}}
-                            <div class="clip-card" id="clip-{{$e.ID}}">
-                                <div class="clip-card-header">
-                                    <span class="clip-card-idx">#{{$i}}</span>
-                                    <span class="clip-card-ts"
-                                        >{{$e.Time}}</span
+                <!-- ████ CHAT PANEL ████ -->
+                {{if not .NoChat}}
+                <section class="panel" id="panel-chat">
+                    <div class="chat-layout">
+                        <!-- Message cards below mirror the markup built in
+                             assets/js/src/chat.js (buildMessageCard). Keep the
+                             two in sync. The body carries the raw text in
+                             data-raw; chat.js renders it to markdown on load. -->
+                        <div class="chat-messages" id="chat-messages">
+                            {{if .Chat}} {{range $e := .Chat}}
+                            <div class="chat-msg" id="msg-{{$e.ID}}">
+                                <div class="chat-msg-header">
+                                    <span class="chat-msg-author"
+                                        >{{$e.Author}}</span
                                     >
-                                    <div class="clip-card-actions">
+                                    <span class="chat-msg-ts">{{$e.Time}}</span>
+                                    {{if $e.Edited}}<span
+                                        class="chat-msg-edited"
+                                        >(edited)</span
+                                    >{{end}}
+                                    <div class="chat-msg-actions">
                                         <button
                                             class="btn btn-sm btn-ghost"
-                                            onclick="copyClip('{{$e.ID}}')"
+                                            onclick="toggleReactionPicker({{$e.ID}})"
+                                            title="Add reaction"
+                                        >
+                                            <svg
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                width="13"
+                                                height="13"
+                                            >
+                                                <circle cx="12" cy="12" r="9" />
+                                                <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+                                                <line
+                                                    x1="9"
+                                                    y1="9"
+                                                    x2="9.01"
+                                                    y2="9"
+                                                />
+                                                <line
+                                                    x1="15"
+                                                    y1="9"
+                                                    x2="15.01"
+                                                    y2="9"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            class="btn btn-sm btn-ghost"
+                                            onclick="copyMessage({{$e.ID}})"
                                             title="Copy"
                                         >
                                             <svg
@@ -705,7 +746,7 @@
                                         </button>
                                         <button
                                             class="btn btn-sm btn-danger"
-                                            onclick="deleteClip('{{$e.ID}}')"
+                                            onclick="deleteMessage({{$e.ID}})"
                                             title="Delete"
                                         >
                                             <svg
@@ -724,10 +765,17 @@
                                         </button>
                                     </div>
                                 </div>
-                                <div class="clip-card-body">{{$e.Content}}</div>
+                                <div
+                                    class="chat-msg-body"
+                                    data-raw="{{$e.Content}}"
+                                ></div>
+                                <div
+                                    class="chat-msg-reactions"
+                                    data-reactions="{{$e.ReactionsJSON}}"
+                                ></div>
                             </div>
                             {{end}} {{else}}
-                            <div class="clip-empty" id="clip-empty">
+                            <div class="chat-empty" id="chat-empty">
                                 <svg
                                     viewBox="0 0 24 24"
                                     fill="none"
@@ -735,49 +783,99 @@
                                     stroke-width="1.5"
                                 >
                                     <path
-                                        d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"
-                                    />
-                                    <rect
-                                        x="8"
-                                        y="2"
-                                        width="8"
-                                        height="4"
-                                        rx="1"
-                                        ry="1"
+                                        d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"
                                     />
                                 </svg>
                                 <p>
-                                    Clipboard is empty.<br />Add an entry below
-                                    to share text across sessions.
+                                    No messages yet.<br />Say hello to your team
+                                    below. Markdown and emoji are supported.
                                 </p>
                             </div>
                             {{end}}
                         </div>
-                        <div class="clip-composer">
-                            <textarea
-                                class="clip-textarea"
-                                id="clip-input"
-                                placeholder="Paste or type text to share…"
-                                rows="3"
-                            ></textarea>
-                            <div class="clip-send-actions">
+                        <div class="chat-composer">
+                            <div class="chat-composer-bar">
+                                <span class="chat-nick-label"
+                                    >as <b id="chat-nick">anon</b></span
+                                >
+                                <button
+                                    class="btn btn-sm btn-ghost"
+                                    onclick="setNick()"
+                                    title="Change nickname"
+                                >
+                                    edit
+                                </button>
+                                <button
+                                    class="btn btn-sm btn-ghost chat-notify-btn"
+                                    id="chat-notify-btn"
+                                    onclick="toggleNotifications()"
+                                    title="Enable desktop notifications for new messages"
+                                >
+                                    🔕
+                                </button>
+                            </div>
+                            <div
+                                class="chat-editing"
+                                id="chat-editing"
+                                hidden
+                            >
+                                <span
+                                    >Editing your message ·
+                                    <b>Esc</b> to cancel</span
+                                >
+                                <button
+                                    class="btn btn-sm btn-ghost"
+                                    onclick="cancelEdit()"
+                                >
+                                    cancel
+                                </button>
+                            </div>
+                            <!-- Thumbnails of images pasted into the composer;
+                                 appended below the text when the message is
+                                 sent. Populated by chat.js (renderAttachments). -->
+                            <div
+                                class="chat-attachments"
+                                id="chat-attachments"
+                            ></div>
+                            <div class="chat-input-wrap">
+                                <!-- Emoji autosuggest popover, filled by chat.js
+                                     while you type a :shortcode. -->
+                                <div
+                                    class="chat-suggest"
+                                    id="chat-suggest"
+                                    hidden
+                                ></div>
+                                <textarea
+                                    class="chat-textarea"
+                                    id="chat-input"
+                                    placeholder="Message your team… (Markdown + emoji, :shortcode: for emoji, paste images, Enter to send, Shift+Enter for newline, ↑ to edit your last)"
+                                    rows="3"
+                                ></textarea>
+                            </div>
+                            <div class="chat-send-actions">
                                 <button
                                     class="btn btn-accent"
-                                    onclick="sendClip()"
+                                    onclick="sendChat()"
                                 >
-                                    Add
+                                    Send
                                 </button>
+                                {{if .ChatUpload}}
                                 <button
                                     class="btn"
-                                    onclick="downloadClipboard()"
+                                    onclick="openChatUpload()"
+                                    title="Attach a file (stored on the server, linked in chat)"
                                 >
-                                    Export
+                                    📎 Attach
                                 </button>
-                                <button
-                                    class="btn btn-danger"
-                                    onclick="clearClipboard()"
-                                >
-                                    Clear
+                                <input
+                                    type="file"
+                                    id="chat-file-input"
+                                    hidden
+                                    onchange="handleChatFile(event)"
+                                />
+                                {{end}}
+                                <button class="btn" onclick="downloadChat()">
+                                    Export
                                 </button>
                             </div>
                         </div>

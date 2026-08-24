@@ -4,12 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/coder/websocket"
+	"goshs.de/goshs/v2/chat"
 	"goshs.de/goshs/v2/cli"
 	"goshs.de/goshs/v2/logger"
 )
+
+// wsReadLimit caps a single inbound websocket message. It is generous enough to
+// carry a chat message with a pasted image inlined as a base64 data: URL, while
+// still bounding memory per frame. Pasted images larger than this should be sent
+// to disk via the chat upload endpoint instead of inlined.
+const wsReadLimit = 16 << 20 // 16 MiB
 
 // Packet defines a packet struct
 type Packet struct {
@@ -72,35 +78,79 @@ func (c *Client) readPump() {
 func (c *Client) dispatchReadPump(packet Packet) {
 	// Switch here over possible socket events and pull in handlers
 	switch packet.Type {
-	case "newEntry":
-		var entry string
-		if err := json.Unmarshal(packet.Content, &entry); err != nil {
+	case "newMessage":
+		var in struct {
+			Author  string `json:"author"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(packet.Content, &in); err != nil {
 			logger.Errorf("Error reading json packet: %+v", err)
+			return
 		}
-		if err := c.hub.cb.AddEntry(entry); err != nil {
-			logger.Errorf("Error creating Clipboard entry: %+v", err)
+		msg, err := c.hub.chat.AddEntry(in.Author, in.Content)
+		if err != nil {
+			logger.Errorf("Error creating chat message: %+v", err)
+			return
 		}
-		c.refreshClipboard()
+		c.broadcastChatMessage(msg)
 
-	case "delEntry":
-		var id string
+	case "editMessage":
+		var in struct {
+			ID      int    `json:"id"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(packet.Content, &in); err != nil {
+			logger.Errorf("Error reading json packet: %+v", err)
+			return
+		}
+		msg, err := c.hub.chat.EditEntry(in.ID, in.Content)
+		if err != nil {
+			logger.Errorf("Error editing chat message with id %d: %+v", in.ID, err)
+			return
+		}
+		c.broadcastChatFull("chatEdit", msg)
+
+	case "react":
+		var in struct {
+			ID     int    `json:"id"`
+			Emoji  string `json:"emoji"`
+			Author string `json:"author"`
+		}
+		if err := json.Unmarshal(packet.Content, &in); err != nil {
+			logger.Errorf("Error reading json packet: %+v", err)
+			return
+		}
+		// Guard against oversized/empty "emoji" payloads from a hostile client;
+		// the value is stored and relayed to every other client.
+		if in.Emoji == "" || len(in.Emoji) > 32 {
+			logger.Warnf("Ignoring reaction with invalid emoji (len %d)", len(in.Emoji))
+			return
+		}
+		msg, err := c.hub.chat.React(in.ID, in.Emoji, in.Author)
+		if err != nil {
+			logger.Errorf("Error reacting to chat message with id %d: %+v", in.ID, err)
+			return
+		}
+		c.broadcastChatFull("chatReaction", msg)
+
+	case "delMessage":
+		var id int
 		if err := json.Unmarshal(packet.Content, &id); err != nil {
 			logger.Errorf("Error reading json packet: %+v", err)
+			return
 		}
-		iid, err := strconv.Atoi(id)
-		if err != nil {
-			logger.Errorf("Error reading json packet: %+v", err)
+		if err := c.hub.chat.DeleteEntry(id); err != nil {
+			logger.Errorf("Error deleting chat message with id %d: %+v", id, err)
+			return
 		}
-		if err := c.hub.cb.DeleteEntry(iid); err != nil {
-			logger.Errorf("Error to delete Clipboard entry with id: %s: %+v", string(packet.Content), err)
-		}
-		c.refreshClipboard()
+		c.broadcastChatDelete(id)
 
-	case "clearClipboard":
-		if err := c.hub.cb.ClearClipboard(); err != nil {
-			logger.Errorf("Error clearing clipboard: %+v", err)
+	case "clearChat":
+		if err := c.hub.chat.Clear(); err != nil {
+			logger.Errorf("Error clearing chat: %+v", err)
+			return
 		}
-		c.refreshClipboard()
+		c.broadcastChatClear()
 
 	case "command":
 		if c.hub.cliEnabled {
@@ -157,6 +207,11 @@ func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request) bool {
 		logger.Errorf("Failed to upgrade ws: %+v", err)
 		return false
 	}
+	// Raise the read limit well above the library default of 32 KiB: chat
+	// messages can carry a pasted image inlined as a base64 data: URL, which
+	// easily exceeds 32 KiB. Without this the Read call errors ("read limited"),
+	// the readPump tears the connection down, and the message is silently lost.
+	conn.SetReadLimit(wsReadLimit)
 
 	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 1024)}
 	client.hub.register <- client
@@ -167,16 +222,53 @@ func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-func (c *Client) refreshClipboard() {
-	sendPkg := &SendPacket{
-		Type: "refreshClipboard",
-	}
-	broadcastMessage, err := json.Marshal(sendPkg)
-	if err != nil {
-		logger.Errorf("Unable to marshal json data in redirect: %+v", err)
-	}
+// broadcastChatMessage fans a newly created chat message out to every client so
+// they can append it live — no page reload.
+func (c *Client) broadcastChatMessage(m chat.Message) {
+	c.broadcastChatFull("chatMessage", m)
+}
 
-	c.hub.Broadcast <- broadcastMessage
+// broadcastChatFull marshals a full chat message (id, author, content, time,
+// edited, reactions) inlined next to the given event type and broadcasts it.
+// Used for chatMessage, chatEdit and chatReaction so every client re-renders
+// from the authoritative message state.
+func (c *Client) broadcastChatFull(typ string, m chat.Message) {
+	evt := struct {
+		Type string `json:"type"`
+		chat.Message
+	}{Type: typ, Message: m}
+	data, err := json.Marshal(evt)
+	if err != nil {
+		logger.Errorf("Unable to marshal %s: %+v", typ, err)
+		return
+	}
+	c.hub.Broadcast <- data
+}
+
+// broadcastChatDelete tells every client to remove the message with the given ID.
+func (c *Client) broadcastChatDelete(id int) {
+	evt := struct {
+		Type string `json:"type"`
+		ID   int    `json:"id"`
+	}{Type: "chatDelete", ID: id}
+	data, err := json.Marshal(evt)
+	if err != nil {
+		logger.Errorf("Unable to marshal chatDelete: %+v", err)
+		return
+	}
+	c.hub.Broadcast <- data
+}
+
+// broadcastChatClear tells every client to empty the chat log.
+func (c *Client) broadcastChatClear() {
+	data, err := json.Marshal(struct {
+		Type string `json:"type"`
+	}{Type: "chatClear"})
+	if err != nil {
+		logger.Errorf("Unable to marshal chatClear: %+v", err)
+		return
+	}
+	c.hub.Broadcast <- data
 }
 
 func (c *Client) updateCLI(output string) {

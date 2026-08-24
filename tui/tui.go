@@ -25,7 +25,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"goshs.de/goshs/v2/catcher"
-	"goshs.de/goshs/v2/clipboard"
+	"goshs.de/goshs/v2/chat"
 	"goshs.de/goshs/v2/goshsversion"
 	"goshs.de/goshs/v2/logger"
 	"goshs.de/goshs/v2/options"
@@ -43,11 +43,11 @@ const maxRows = 500
 // Ctrl+C) or the self-destruct timer fires on ttlC. It subscribes to the hub
 // for the duration and unsubscribes on exit. The caller is responsible for
 // shutting the servers down afterwards. ttlC may be nil when --ttl is unset.
-func Run(opts *options.Options, hub *ws.Hub, mgr *catcher.Manager, clip *clipboard.Clipboard, tunnelURL func() string, ttlC <-chan time.Time) error {
+func Run(opts *options.Options, hub *ws.Hub, mgr *catcher.Manager, ch *chat.Chat, tunnelURL func() string, ttlC <-chan time.Time) error {
 	sub := hub.Subscribe()
 	defer hub.Unsubscribe(sub)
 
-	m := newModel(opts, hub, mgr, sub, clip, tunnelURL, ttlC)
+	m := newModel(opts, hub, mgr, sub, ch, tunnelURL, ttlC)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
@@ -129,14 +129,14 @@ const (
 	paneSMTP
 	paneShells
 	paneGenerator
-	paneClipboard
+	paneChat
 )
 
 type model struct {
 	opts *options.Options
 	hub  *ws.Hub
 	mgr  *catcher.Manager
-	clip *clipboard.Clipboard
+	chat *chat.Chat
 	sub  chan []byte
 
 	tunnelURL func() string    // live public tunnel URL getter; nil when unavailable
@@ -176,7 +176,7 @@ type model struct {
 	passwordSeen bool // plaintext uncovered (vs. masked with dots)
 }
 
-func newModel(opts *options.Options, hub *ws.Hub, mgr *catcher.Manager, sub chan []byte, clip *clipboard.Clipboard, tunnelURL func() string, ttlC <-chan time.Time) *model {
+func newModel(opts *options.Options, hub *ws.Hub, mgr *catcher.Manager, sub chan []byte, ch *chat.Chat, tunnelURL func() string, ttlC <-chan time.Time) *model {
 	var deadline time.Time
 	if opts.TTL > 0 {
 		deadline = time.Now().Add(opts.TTL)
@@ -185,7 +185,7 @@ func newModel(opts *options.Options, hub *ws.Hub, mgr *catcher.Manager, sub chan
 		opts:      opts,
 		hub:       hub,
 		mgr:       mgr,
-		clip:      clip,
+		chat:      ch,
 		sub:       sub,
 		tunnelURL: tunnelURL,
 		ttl:       ttlC,
@@ -200,7 +200,7 @@ func newModel(opts *options.Options, hub *ws.Hub, mgr *catcher.Manager, sub chan
 			{name: "SMTP", icon: "📨"},
 			{name: "SHELLS", icon: "🐚"},
 			{name: "GENERATOR", icon: "⚡"},
-			{name: "CLIPBOARD", icon: "📋"},
+			{name: "CHAT", icon: "💬"},
 		},
 	}
 }
@@ -252,7 +252,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.refreshShells()
-		m.refreshClipboard()
+		m.refreshChat()
 		if !m.flashExpiry.IsZero() && time.Now().After(m.flashExpiry) {
 			m.flash = ""
 			m.flashExpiry = time.Time{}
@@ -269,7 +269,7 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.showPassword {
 		return m.handlePasswordKey(msg)
 	}
-	// While typing a new clipboard entry, keys feed the input buffer instead of
+	// While typing a new chat message, keys feed the input buffer instead of
 	// driving navigation.
 	if m.inputActive {
 		return m.handleInputKey(msg)
@@ -331,12 +331,12 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Export all panes to goshs-all-logs.json.
 		m.exportAll()
 	case "a":
-		// Clipboard: add an entry. Shells: start a listener. Both open the
+		// Chat: post a message. Shells: start a listener. Both open the
 		// single-line input prompt.
 		switch m.active {
-		case paneClipboard:
-			if m.clip != nil {
-				m.beginInput("add entry", func(text string) tea.Cmd { return m.addClipboardEntry(text) })
+		case paneChat:
+			if m.chat != nil {
+				m.beginInput("message", func(text string) tea.Cmd { return m.addChatEntry(text) })
 			}
 		case paneShells:
 			if m.mgr != nil {
@@ -346,11 +346,11 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "d":
-		// Clipboard: delete the selected entry. Shells: stop the selected
+		// Chat: delete the selected message. Shells: stop the selected
 		// listener.
 		switch m.active {
-		case paneClipboard:
-			return m, m.deleteClipboardEntry()
+		case paneChat:
+			return m, m.deleteChatEntry()
 		case paneShells:
 			return m, m.shellDelete()
 		}
@@ -375,9 +375,9 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.upgradeSelectedSession(true)
 		}
 	case "C":
-		// Clear the whole clipboard (clipboard pane only).
-		if m.active == paneClipboard {
-			return m, m.clearClipboard()
+		// Clear the whole chat log (chat pane only).
+		if m.active == paneChat {
+			return m, m.clearChat()
 		}
 	case "s":
 		// Save the selected mail's attachments to disk (SMTP pane only).
@@ -482,10 +482,12 @@ func (m *model) ingest(raw []byte) {
 		m.addSMB(raw)
 	case "ldap":
 		m.addLDAP(raw)
-	case "refreshClipboard":
-		// A web client (or our own mutation) changed the shared clipboard;
-		// rebuild the pane immediately rather than waiting for the next tick.
-		m.refreshClipboard()
+	case "chatMessage", "chatEdit", "chatReaction", "chatDelete", "chatClear":
+		// A web client (or our own mutation) changed the shared chat log; the
+		// ws handler has already mutated the shared struct, so rebuild the pane
+		// from it immediately rather than waiting for the next tick. (Reactions
+		// aren't shown in the TUI pane yet, but rebuilding keeps edits current.)
+		m.refreshChat()
 	}
 	// catcherConnection events are intentionally ignored here: the SHELLS pane
 	// is rebuilt from the catcher manager on every tick, which reflects both
@@ -1017,22 +1019,39 @@ func parseListenerAddr(s string) (string, int, error) {
 	return ip, port, nil
 }
 
-// --- clipboard --------------------------------------------------------------
+// --- chat --------------------------------------------------------------------
 
-// refreshClipboard rebuilds the CLIPBOARD pane from the shared clipboard so it
-// reflects entries added from the web UI as well as the TUI. Entries are kept
-// newest-first (the clipboard prepends), matching the other panes.
-func (m *model) refreshClipboard() {
-	if m.clip == nil {
+// tuiAuthor is the display name attached to messages posted from the TUI. The
+// web UI lets each browser pick a nickname; the terminal operator has no such
+// prompt yet (rich TUI chat is a later phase), so we derive a stable label from
+// the host it runs on.
+func tuiAuthor() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		return "tui"
+	}
+	return "tui@" + host
+}
+
+// refreshChat rebuilds the CHAT pane from the shared chat log so it reflects
+// messages posted from the web UI as well as the TUI. The pane order matches
+// the log order (oldest first), so the selection index maps directly to the
+// message slice for delete.
+func (m *model) refreshChat() {
+	if m.chat == nil {
 		return
 	}
-	p := m.panes[paneClipboard]
+	p := m.panes[paneChat]
 	prevSel := p.sel
-	entries, _ := m.clip.GetEntries()
+	messages, _ := m.chat.GetEntries()
 	p.rows = p.rows[:0]
-	for _, e := range entries {
-		summary := fmt.Sprintf("%s  %s", e.Time, oneLine(e.Content))
-		detail := fmt.Sprintf("Time: %s\n\n%s\n", e.Time, e.Content)
+	for _, e := range messages {
+		edited := ""
+		if e.Edited {
+			edited = " (edited)"
+		}
+		summary := fmt.Sprintf("%s  %s: %s%s", e.Time, e.Author, oneLine(e.Content), edited)
+		detail := fmt.Sprintf("From: %s\nTime: %s%s\n\n%s\n", e.Author, e.Time, edited, e.Content)
 		raw, _ := json.Marshal(e)
 		p.rows = append(p.rows, eventRow{summary: summary, detail: detail, accent: lipgloss.Color(nord7), raw: raw})
 	}
@@ -1081,68 +1100,87 @@ func (m *model) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// addClipboardEntry stores a new shared-clipboard entry and tells web clients
-// to re-fetch.
-func (m *model) addClipboardEntry(text string) tea.Cmd {
-	if m.clip == nil {
+// addChatEntry posts a new chat message (authored by the TUI) and broadcasts
+// the concrete chatMessage event so web clients append it live.
+func (m *model) addChatEntry(text string) tea.Cmd {
+	if m.chat == nil {
 		return nil
 	}
-	if err := m.clip.AddEntry(text); err != nil {
-		m.setFlash("clipboard add failed: " + err.Error())
+	msg, err := m.chat.AddEntry(tuiAuthor(), text)
+	if err != nil {
+		m.setFlash("chat post failed: " + err.Error())
 		return nil
 	}
-	m.refreshClipboard()
-	m.setFlash("added clipboard entry")
-	return m.broadcast("refreshClipboard")
+	m.refreshChat()
+	m.setFlash("posted message")
+	return m.broadcastPayload(struct {
+		Type string `json:"type"`
+		chat.Message
+	}{Type: "chatMessage", Message: msg})
 }
 
-// deleteClipboardEntry removes the selected clipboard entry and tells web
-// clients to re-fetch.
-func (m *model) deleteClipboardEntry() tea.Cmd {
-	if m.clip == nil {
+// deleteChatEntry removes the selected message and broadcasts a chatDelete event
+// so web clients drop it live.
+func (m *model) deleteChatEntry() tea.Cmd {
+	if m.chat == nil {
 		return nil
 	}
-	p := m.panes[paneClipboard]
+	p := m.panes[paneChat]
 	if len(p.rows) == 0 {
 		return nil
 	}
-	// GetEntries and the pane share the same newest-first order, so the
-	// selection index maps directly to the clipboard slice position.
-	if err := m.clip.DeleteEntry(p.sel); err != nil {
-		m.setFlash("clipboard delete failed: " + err.Error())
+	// The pane and GetEntries share the same order, so the selection index maps
+	// to the message slice — but delete is keyed by the stable message ID.
+	messages, _ := m.chat.GetEntries()
+	if p.sel >= len(messages) {
 		return nil
 	}
-	m.refreshClipboard()
-	m.setFlash("deleted clipboard entry")
-	return m.broadcast("refreshClipboard")
+	id := messages[p.sel].ID
+	if err := m.chat.DeleteEntry(id); err != nil {
+		m.setFlash("chat delete failed: " + err.Error())
+		return nil
+	}
+	m.refreshChat()
+	m.setFlash("deleted message")
+	return m.broadcastPayload(struct {
+		Type string `json:"type"`
+		ID   int    `json:"id"`
+	}{Type: "chatDelete", ID: id})
 }
 
-// clearClipboard empties the shared clipboard and tells web clients to
-// re-fetch.
-func (m *model) clearClipboard() tea.Cmd {
-	if m.clip == nil {
+// clearChat empties the shared chat log and broadcasts a chatClear event so web
+// clients empty their view live.
+func (m *model) clearChat() tea.Cmd {
+	if m.chat == nil {
 		return nil
 	}
-	if err := m.clip.ClearClipboard(); err != nil {
-		m.setFlash("clipboard clear failed: " + err.Error())
+	if err := m.chat.Clear(); err != nil {
+		m.setFlash("chat clear failed: " + err.Error())
 		return nil
 	}
-	m.refreshClipboard()
-	m.setFlash("cleared clipboard")
-	return m.broadcast("refreshClipboard")
+	m.refreshChat()
+	m.setFlash("cleared chat")
+	return m.broadcastPayload(struct {
+		Type string `json:"type"`
+	}{Type: "chatClear"})
 }
 
 // broadcast notifies web clients (and our own subscription) of a state change
-// of the given type (e.g. "refreshClipboard", "refreshCatcher") so they
-// re-fetch. The send runs in a command so it never blocks the UI loop on the
-// unbuffered Broadcast channel.
+// of the given type (e.g. "refreshCatcher") so they re-fetch. The send runs in
+// a command so it never blocks the UI loop on the unbuffered Broadcast channel.
 func (m *model) broadcast(typ string) tea.Cmd {
+	return m.broadcastPayload(struct {
+		Type string `json:"type"`
+	}{Type: typ})
+}
+
+// broadcastPayload marshals an arbitrary event and sends it to the hub in a
+// command so it never blocks the UI loop on the unbuffered Broadcast channel.
+func (m *model) broadcastPayload(v any) tea.Cmd {
 	if m.hub == nil {
 		return nil
 	}
-	msg, err := json.Marshal(struct {
-		Type string `json:"type"`
-	}{typ})
+	msg, err := json.Marshal(v)
 	if err != nil {
 		return nil
 	}
@@ -1833,8 +1871,8 @@ func (m *model) controlsHint() string {
 	}
 	var hint string
 	switch m.active {
-	case paneClipboard:
-		hint = "⇄ Tab/←→ panes · ↑↓ scroll · ⏎ view · a add · d delete · C clear · e export · q quit"
+	case paneChat:
+		hint = "⇄ Tab/←→ panes · ↑↓ scroll · ⏎ view · a post · d delete · C clear · q quit"
 	case paneShells:
 		hint = "⇄ Tab/←→ panes · ↑↓ select · ⏎/i attach · u/U upgrade · a start · r restart · d stop/kill · q quit"
 	case paneSMTP:
@@ -2049,7 +2087,7 @@ func host(addr string) string {
 }
 
 // oneLine collapses newlines and tabs to spaces so multi-line content (e.g. a
-// clipboard entry) fits on a single summary row.
+// chat message) fits on a single summary row.
 func oneLine(s string) string {
 	return strings.Join(strings.FieldsFunc(s, func(r rune) bool {
 		return r == '\n' || r == '\r' || r == '\t'
