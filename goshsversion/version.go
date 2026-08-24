@@ -1,3 +1,3 @@
 package goshsversion
 
-var GoshsVersion = "v2.1.5"
+var GoshsVersion = "v2.1.6"

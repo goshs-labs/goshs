@@ -1,5 +1,5 @@
 Name:           goshs
-Version:        2.1.5
+Version:        2.1.6
 Release:        1%{?dist}
 Summary:        Beyond Python's http.server — single-binary file server for pentesters
 
@@ -46,6 +46,8 @@ install -Dm 0755 %{name} %{buildroot}%{_bindir}/%{name}
 %{_bindir}/%{name}
 
 %changelog
+* Mon Aug 24 2026 Patrick Hener <patrickhener@gmx.de> - 2.1.6-1
+- Add new version v2.1.6
 * Sun Aug 02 2026 Patrick Hener <patrickhener@gmx.de> - 2.1.5-1
 - Add new version v2.1.5
 * Fri Jul 03 2026 Patrick Hener <patrickhener@gmx.de> - 2.1.4-1
