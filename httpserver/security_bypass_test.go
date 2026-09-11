@@ -135,6 +135,70 @@ func TestUpload_ValidFilename_Succeeds(t *testing.T) {
 	require.Equal(t, "hello", string(got))
 }
 
+// Folder upload: a multipart filename carrying a relative path (as browsers send
+// via webkitRelativePath) must recreate the subdirectory tree, creating any
+// intermediate directories, rather than flattening or rejecting the file.
+func TestUpload_FolderPath_PreservesSubdirectory(t *testing.T) {
+	webroot := t.TempDir()
+	fs, cleanup := newTestFileServer(t, webroot)
+	defer cleanup()
+
+	body, ctype := multipartUpload(t, "sub/dir/file.txt", "nested")
+	r := httptest.NewRequest(http.MethodPost, "/upload", body)
+	r.Header.Set("Content-Type", ctype)
+	r.Header.Set("X-CSRF-Token", "test-csrf")
+	w := httptest.NewRecorder()
+
+	fs.upload(w, r)
+
+	require.Equal(t, http.StatusSeeOther, w.Code)
+	got, err := os.ReadFile(filepath.Join(webroot, "sub", "dir", "file.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "nested", string(got))
+}
+
+// Folder upload must not become a traversal primitive: a relative path that
+// climbs out of the target with ".." is rejected, leaving nothing outside the
+// webroot. sanitizePath cleans "sub/../../escape.txt" and detects the escape.
+func TestUpload_FolderPath_DotDot_NoEscape(t *testing.T) {
+	webroot := t.TempDir()
+	fs, cleanup := newTestFileServer(t, webroot)
+	defer cleanup()
+
+	escape := filepath.Join(filepath.Dir(webroot), "escape.txt")
+	t.Cleanup(func() { _ = os.Remove(escape) })
+
+	body, ctype := multipartUpload(t, "sub/../../escape.txt", "ESCAPED_WRITE_PROOF")
+	r := httptest.NewRequest(http.MethodPost, "/upload", body)
+	r.Header.Set("Content-Type", ctype)
+	r.Header.Set("X-CSRF-Token", "test-csrf")
+	w := httptest.NewRecorder()
+
+	fs.upload(w, r)
+
+	_, err := os.Stat(escape)
+	require.Truef(t, os.IsNotExist(err), "file escaped the webroot at %s", escape)
+}
+
+// A .goshs component anywhere in an uploaded folder path must be rejected, so a
+// folder upload cannot plant or shadow an ACL file.
+func TestUpload_FolderPath_GoshsComponent_Blocked(t *testing.T) {
+	webroot := t.TempDir()
+	fs, cleanup := newTestFileServer(t, webroot)
+	defer cleanup()
+
+	body, ctype := multipartUpload(t, "sub/.goshs", `{"block":["x"]}`)
+	r := httptest.NewRequest(http.MethodPost, "/upload", body)
+	r.Header.Set("Content-Type", ctype)
+	r.Header.Set("X-CSRF-Token", "test-csrf")
+	w := httptest.NewRecorder()
+
+	fs.upload(w, r)
+
+	_, err := os.Stat(filepath.Join(webroot, "sub", ".goshs"))
+	require.Truef(t, os.IsNotExist(err), "an uploaded .goshs path component must be blocked")
+}
+
 // GHSA-966r-mw4j-rv64: HTTP PUT opens the target with O_TRUNC, so overwriting an
 // existing file destroys its contents. Under --no-delete that must be blocked and
 // the file left intact.

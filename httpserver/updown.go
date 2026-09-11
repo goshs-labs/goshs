@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -141,26 +142,50 @@ func (fs *FileServer) upload(w http.ResponseWriter, req *http.Request) {
 			continue // skip form fields
 		}
 
-		// sanitize filename (No path traversal). part.FileName() already applies
-		// filepath.Base, but that still lets ".." through, and filepath.Join with
-		// ".." would resolve to the parent of targetDir — writing outside the
-		// served tree. Reject any name that is empty, "." or ".." after cleaning.
-		filenameSlice := strings.Split(part.FileName(), "/")
-		filenameClean := filenameSlice[len(filenameSlice)-1]
+		// Determine the (possibly nested) upload path. part.FileName() applies
+		// filepath.Base, which discards the directory prefix a folder upload
+		// carries in the multipart filename (browsers send webkitRelativePath,
+		// e.g. "subdir/file.txt"). Parse the raw Content-Disposition filename
+		// instead so the subdirectory tree is preserved; fall back to the
+		// base name when the header cannot be parsed.
+		rawName := part.FileName()
+		if cd := part.Header.Get("Content-Disposition"); cd != "" {
+			if _, params, perr := mime.ParseMediaType(cd); perr == nil {
+				if fn := params["filename"]; fn != "" {
+					rawName = fn
+				}
+			}
+		}
 
-		if filenameClean == "" || filenameClean == "." || filenameClean == ".." {
-			logger.Warnf("blocked upload with invalid filename %q", part.FileName())
+		// Resolve and traversal-check the destination in one step. sanitizePath
+		// cleans the relative path and guarantees the result stays within
+		// targetDir, so any ".." smuggled through a crafted webkitRelativePath is
+		// neutralised while legitimate subdirectories are kept.
+		finalPath, perr := sanitizePath(targetDir, rawName)
+		if perr != nil {
+			logger.Warnf("blocked upload escaping target directory: %q", rawName)
 			continue
 		}
 
-		// Block overwriting the .goshs ACL file
-		if filenameClean == ".goshs" {
-			logger.Warnf("blocked attempt to upload file named .goshs")
+		// Reject names that resolve to the target directory itself
+		// (empty, ".", ".." after cleaning).
+		if finalPath == filepath.Clean(targetDir) {
+			logger.Warnf("blocked upload with invalid filename %q", rawName)
 			continue
 		}
 
-		// Prepare destination file paths
-		finalPath := filepath.Join(targetDir, filenameClean)
+		// Block creating or shadowing the .goshs ACL file anywhere along the
+		// path (both a file named .goshs and a directory that would mask one).
+		rel, relErr := filepath.Rel(targetDir, finalPath)
+		if relErr != nil {
+			logger.Warnf("blocked upload with invalid path %q", rawName)
+			continue
+		}
+		if slices.Contains(strings.Split(rel, string(os.PathSeparator)), ".goshs") {
+			logger.Warnf("blocked attempt to upload path containing .goshs: %q", rawName)
+			continue
+		}
+
 		tempPath := finalPath + "~"
 
 		// The final os.Rename clobbers any existing same-named file, destroying
@@ -173,12 +198,12 @@ func (fs *FileServer) upload(w http.ResponseWriter, req *http.Request) {
 			}
 		}
 
-		// Defence in depth: ensure the resolved destination stays inside targetDir
-		// even if filenameClean ever slips a separator or traversal past the checks
-		// above.
-		if _, err := sanitizePath(targetDir, filenameClean); err != nil {
-			logger.Warnf("blocked upload escaping target directory: %q", part.FileName())
-			continue
+		// Create any intermediate subdirectories the relative path requires
+		// (folder uploads). The parent is guaranteed to stay within targetDir by
+		// the sanitizePath check above.
+		if err := os.MkdirAll(filepath.Dir(finalPath), 0755); err != nil {
+			logger.Errorf("creating upload subdirectory: %+v", err)
+			return
 		}
 
 		// Create temp file

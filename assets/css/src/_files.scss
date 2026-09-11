@@ -314,6 +314,11 @@
     color: var(--text2);
     margin-top: 4px;
 }
+.upload-folder-btn {
+    margin-top: 8px;
+    width: 100%;
+    justify-content: center;
+}
 #upload-file-list {
     display: flex;
     flex-direction: column;

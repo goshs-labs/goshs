@@ -133,23 +133,36 @@ export function openMkdir() {
   setTimeout(() => document.getElementById("mkdir-input").focus(), 50);
 }
 
-export function handleFileSelect(files) {
-  Array.from(files).forEach((f) => {
+// addPending merges {file, path} entries into the pending list, de-duplicating
+// by relative path + size so the same file dropped twice is not queued twice.
+function addPending(entries) {
+  entries.forEach(({ file, path }) => {
     if (
-      !ST.pendingUploads.find((p) => p.name === f.name && p.size === f.size)
+      !ST.pendingUploads.find((p) => p.path === path && p.file.size === file.size)
     ) {
-      ST.pendingUploads.push(f);
+      ST.pendingUploads.push({ file, path });
     }
   });
   renderUploadList();
 }
+export function handleFileSelect(files) {
+  // Input elements expose the folder structure via webkitRelativePath (set when
+  // the <input webkitdirectory> folder picker is used); plain file inputs leave
+  // it empty, so fall back to the flat name.
+  addPending(
+    Array.from(files).map((f) => ({
+      file: f,
+      path: f.webkitRelativePath || f.name,
+    })),
+  );
+}
 function renderUploadList() {
   const list = document.getElementById("upload-file-list");
   list.innerHTML = "";
-  ST.pendingUploads.forEach((f, i) => {
+  ST.pendingUploads.forEach((p, i) => {
     const item = document.createElement("div");
     item.className = "upload-file-item";
-    item.innerHTML = `<span class="fname">${esc(f.name)}</span><span class="fsize">${fmtBytes(f.size)}</span>
+    item.innerHTML = `<span class="fname">${esc(p.path)}</span><span class="fsize">${fmtBytes(p.file.size)}</span>
 <button class="fremove" onclick="removeUpload(${i})">✕</button>`;
     list.appendChild(item);
   });
@@ -164,7 +177,10 @@ export function startUpload() {
     return;
   }
   const fd = new FormData();
-  ST.pendingUploads.forEach((f) => fd.append("file", f));
+  // The third argument sets the multipart part filename to the relative path, so
+  // the server can recreate the folder tree (updown.go parses it from the raw
+  // Content-Disposition header).
+  ST.pendingUploads.forEach((p) => fd.append("file", p.file, p.path));
   const wrap = document.getElementById("upload-progress-wrap");
   const bar = document.getElementById("upload-progress-bar");
   wrap.style.display = "block";
@@ -220,6 +236,63 @@ export function createDir() {
 }
 
 // ══ DRAG-DROP ══
+// Recursively walk a dropped DataTransfer entry tree, collecting {file, path}
+// pairs. path uses forward slashes so it matches webkitRelativePath and the
+// server's relative-path handling.
+function readEntries(reader) {
+  return new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+}
+async function traverseEntry(entry, prefix, out) {
+  if (entry.isFile) {
+    const file = await new Promise((resolve, reject) =>
+      entry.file(resolve, reject),
+    );
+    out.push({ file, path: prefix + entry.name });
+  } else if (entry.isDirectory) {
+    const reader = entry.createReader();
+    // readEntries returns at most 100 entries per call, so drain in batches.
+    let batch;
+    do {
+      batch = await readEntries(reader);
+      for (const child of batch) {
+        await traverseEntry(child, prefix + entry.name + "/", out);
+      }
+    } while (batch.length > 0);
+  }
+}
+// itemsToEntries turns a dropped DataTransferItemList into {file, path} pairs,
+// preserving any folder structure. webkitGetAsEntry()/getAsFile() must be called
+// synchronously before the first await, or the item list becomes invalid.
+async function itemsToEntries(items) {
+  const roots = [];
+  for (const it of items) {
+    if (it.kind !== "file") continue;
+    const entry = it.webkitGetAsEntry && it.webkitGetAsEntry();
+    if (entry) {
+      roots.push(entry);
+    } else {
+      const f = it.getAsFile();
+      if (f) roots.push({ isFile: true, name: f.name, _file: f });
+    }
+  }
+  const out = [];
+  for (const root of roots) {
+    if (root._file) {
+      out.push({ file: root._file, path: root.name });
+    } else {
+      await traverseEntry(root, "", out);
+    }
+  }
+  return out;
+}
+// entriesFromDrop prefers the entry API (folder-aware) and falls back to the
+// flat FileList when it is unavailable.
+async function entriesFromDrop(dt) {
+  if (dt.items && dt.items.length && dt.items[0].webkitGetAsEntry) {
+    return itemsToEntries(dt.items);
+  }
+  return Array.from(dt.files).map((f) => ({ file: f, path: f.name }));
+}
 function initDrop() {
   const overlay = document.getElementById("drop-overlay");
   let dragCnt = 0;
@@ -238,13 +311,13 @@ function initDrop() {
   document.addEventListener("dragover", (e) => {
     e.preventDefault();
   });
-  document.addEventListener("drop", (e) => {
+  document.addEventListener("drop", async (e) => {
     e.preventDefault();
     dragCnt = 0;
     overlay.classList.remove("active");
-    const files = e.dataTransfer.files;
-    if (files.length) {
-      handleFileSelect(files);
+    const entries = await entriesFromDrop(e.dataTransfer);
+    if (entries.length) {
+      addPending(entries);
       openModal("upload-modal");
     }
   });
@@ -256,10 +329,10 @@ function initDrop() {
       mda.classList.add("hover");
     });
     mda.addEventListener("dragleave", () => mda.classList.remove("hover"));
-    mda.addEventListener("drop", (e) => {
+    mda.addEventListener("drop", async (e) => {
       e.preventDefault();
       mda.classList.remove("hover");
-      handleFileSelect(e.dataTransfer.files);
+      addPending(await entriesFromDrop(e.dataTransfer));
     });
   }
 }
