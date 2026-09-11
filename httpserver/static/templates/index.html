@@ -2038,8 +2038,23 @@
                             />
                         </svg>
                         <p>Click to select or drag files here</p>
-                        <p class="hint">Multiple files supported</p>
+                        <p class="hint">Files &amp; folders supported</p>
                     </div>
+                    <input
+                        type="file"
+                        id="folder-input"
+                        webkitdirectory
+                        multiple
+                        hidden
+                        onchange="handleFileSelect(this.files)"
+                    />
+                    <button
+                        class="btn upload-folder-btn"
+                        type="button"
+                        onclick="document.getElementById('folder-input').click()"
+                    >
+                        📁 Select folder
+                    </button>
                     <div id="upload-file-list"></div>
                     <div class="progress-bar-wrap" id="upload-progress-wrap">
                         <div
