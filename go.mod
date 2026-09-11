@@ -19,7 +19,7 @@ require (
 	github.com/howeyc/gopass v0.0.0-20210920133722-c8aef6fb66ef
 	github.com/inconshreveable/go-update v0.0.0-20160112193335-8152e7eb6ccf
 	github.com/miekg/dns v1.1.73
-	github.com/moby/moby/api v1.55.0
+	github.com/moby/moby/api v1.56.0
 	github.com/pkg/sftp v1.13.11
 	github.com/sirupsen/logrus v1.10.2
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
