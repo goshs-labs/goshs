@@ -162,6 +162,7 @@ These are the awesome contributors that made `goshs` even more secure :heart:
   <td align="center"><a href="https://github.com/arbor-s"><img src="https://github.com/arbor-s.png?size=50" width="50" height="50"></a></td>
   <td align="center"><a href="https://github.com/decsecre583"><img src="https://github.com/decsecre583.png?size=50" width="50" height="50"></a></td>
   <td align="center"><a href="https://github.com/Forrof"><img src="https://github.com/Forrof.png?size=50" width="50" height="50"></a></td>
+  <td align="center"><a href="https://github.com/jimaf">jimaf</a></td>
   <td align="center"><a href="https://github.com/wooseokdotkim">wooseokdotkim</a></td>
   <td align="center"><a href="https://github.com/Guilhem7">Guilhem7</a></td>
 </tr></table>
