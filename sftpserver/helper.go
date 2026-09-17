@@ -21,6 +21,11 @@ import (
 
 var authorizedKeysMap map[string]bool
 
+// errACLDenied is returned when a per-folder .goshs ACL forbids an SFTP
+// operation: the target directory (or a file's parent) sets an Auth requirement
+// an SFTP client cannot present, or the target is block-listed (GHSA-2m7f-jq4x-rcj7).
+var errACLDenied = errors.New("access denied by .goshs ACL")
+
 // loadAuthorizedKeys loads authorized keys from a file and returns a map of keys
 func loadAuthorizedKeys(path string) (map[string]bool, error) {
 	file, err := os.Open(path)
@@ -89,6 +94,11 @@ func readFile(root string, r *sftp.Request, ip string, sftpServer *SFTPServer) (
 		sftpServer.HandleWebhookSend("sftp", r, ip, true)
 		return nil, err
 	}
+	if !sftpServer.protocolACL().Allowed(fullPath) {
+		logger.LogSFTPRequestBlocked(r, ip, errACLDenied)
+		sftpServer.HandleWebhookSend("sftp", r, ip, true)
+		return nil, errACLDenied
+	}
 	sftpServer.HandleWebhookSend("sftp", r, ip, false)
 	logger.LogSFTPRequest(r, ip)
 	return os.Open(fullPath)
@@ -104,6 +114,11 @@ func listFile(root string, r *sftp.Request, ip string, sftpServer *SFTPServer) (
 		logger.LogSFTPRequestBlocked(r, ip, err)
 		sftpServer.HandleWebhookSend("sftp", r, ip, true)
 		return nil, err
+	}
+	if !sftpServer.protocolACL().Allowed(fullPath) {
+		logger.LogSFTPRequestBlocked(r, ip, errACLDenied)
+		sftpServer.HandleWebhookSend("sftp", r, ip, true)
+		return nil, errACLDenied
 	}
 	switch r.Method {
 	case "Stat":
@@ -132,6 +147,10 @@ func listFile(root string, r *sftp.Request, ip string, sftpServer *SFTPServer) (
 			return nil, err
 		}
 
+		// Hide the .goshs file, block-listed entries, and auth-protected
+		// subdirectories from the listing (GHSA-2m7f-jq4x-rcj7).
+		infos = sftpServer.protocolACL().FilterListing(fullPath, infos)
+
 		return &simpleListerAt{files: infos}, nil
 	}
 }
@@ -146,6 +165,11 @@ func writeFile(root string, r *sftp.Request, ip string, sftpServer *SFTPServer) 
 		logger.LogSFTPRequestBlocked(r, ip, err)
 		sftpServer.HandleWebhookSend("sftp", r, ip, true)
 		return nil, err
+	}
+	if !sftpServer.protocolACL().Allowed(fullPath) {
+		logger.LogSFTPRequestBlocked(r, ip, errACLDenied)
+		sftpServer.HandleWebhookSend("sftp", r, ip, true)
+		return nil, errACLDenied
 	}
 	// Enforce --no-delete: overwriting an existing file with os.Create truncates
 	// it, which destroys its previous contents — a deletion. Block it while still
@@ -175,6 +199,11 @@ func cmdFile(root string, r *sftp.Request, ip string, sftpServer *SFTPServer) er
 		logger.LogSFTPRequestBlocked(r, ip, err)
 		sftpServer.HandleWebhookSend("sftp", r, ip, true)
 		return err
+	}
+	if !sftpServer.protocolACL().Allowed(fullPath) {
+		logger.LogSFTPRequestBlocked(r, ip, errACLDenied)
+		sftpServer.HandleWebhookSend("sftp", r, ip, true)
+		return errACLDenied
 	}
 
 	// Enforce --no-delete: Remove, Rmdir and Rename all destroy or move existing
@@ -232,6 +261,13 @@ func cmdFile(root string, r *sftp.Request, ip string, sftpServer *SFTPServer) er
 			logger.LogSFTPRequestBlocked(r, ip, err)
 			sftpServer.HandleWebhookSend("sftp", r, ip, true)
 			return err
+		}
+		// Also gate the destination: a rename must not drop a file into a
+		// protected/blocked folder (GHSA-2m7f-jq4x-rcj7).
+		if !sftpServer.protocolACL().Allowed(targetPath) {
+			logger.LogSFTPRequestBlocked(r, ip, errACLDenied)
+			sftpServer.HandleWebhookSend("sftp", r, ip, true)
+			return errACLDenied
 		}
 		err = os.Rename(fullPath, targetPath)
 		if err != nil {

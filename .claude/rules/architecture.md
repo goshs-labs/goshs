@@ -277,6 +277,20 @@ matching update.
   `aclSatisfied()` (response-safe ACL checks), `verifyCredentials` (brute-force
   lockout with reset-after-duration), `sanitizePath` (path traversal; deliberately
   does **not** double-URL-decode, to preserve literal `%`/`+` in filenames).
+- **The `.goshs` per-folder ACL must be enforced on *every* protocol that serves the
+  webroot, not just HTTP.** HTTP uses `applyCustomAuth`/`aclSatisfied`; WebDAV uses
+  `webdavEnforceACL`/`aclFile.Readdir`. Credential-less transfer protocols (SFTP)
+  cannot present a folder's basic-auth, so they enforce via
+  `httpserver.ProtocolACL` (`acl_protocol.go`), which **fails closed**: a non-empty
+  `.goshs` `auth` is an unsatisfiable requirement → hard deny; block-listed names and
+  the `.goshs` file itself are denied; `FilterListing` hides `.goshs`, blocked
+  entries, and auth-protected subdirs. SFTP wires `Allowed()` into
+  `readFile`/`writeFile`/`listFile`/`cmdFile` (incl. the Rename *destination*) in
+  `sftpserver/helper.go`. A prior gap where SFTP consulted only `sanitizePath` and
+  never the ACL was **GHSA-2m7f-jq4x-rcj7** (full read/write bypass of protected
+  folders); regression-tested in `sftpserver/acl_test.go`. FTP has no per-folder-auth
+  concept beyond its mode flags. When adding a new read/transfer protocol, wire
+  `ProtocolACL` or you reopen this class.
 - **Bulk download** zip walker enforces per-file ACL and excludes `.goshs` during the
   recursive walk (regression-tested in `httpserver/bulk_acl_test.go`) — a prior bug let
   parent-dir bulk selection bypass nested `.goshs` auth/block.

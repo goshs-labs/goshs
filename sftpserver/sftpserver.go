@@ -32,7 +32,8 @@ type SFTPServer struct {
 	Webhook     webhook.Webhook
 	Whitelist   *httpserver.Whitelist
 
-	ln net.Listener // bound by Bind, served by Start
+	acl *httpserver.ProtocolACL // per-folder .goshs ACL enforcement (GHSA-2m7f-jq4x-rcj7)
+	ln  net.Listener            // bound by Bind, served by Start
 }
 
 func NewSFTPServer(opts *options.Options, wl *httpserver.Whitelist, webhook webhook.Webhook) *SFTPServer {
@@ -49,7 +50,20 @@ func NewSFTPServer(opts *options.Options, wl *httpserver.Whitelist, webhook webh
 		HostKeyFile: opts.FTPHostKeyFile,
 		Webhook:     webhook,
 		Whitelist:   wl,
+		acl:         httpserver.NewProtocolACL(opts.Webroot),
 	}
+}
+
+// protocolACL returns the .goshs ACL enforcer for this server, lazily building
+// one from Root if the field was not set (e.g. an SFTPServer constructed as a
+// struct literal in tests). Never caches on the lazy path, so it stays race-free
+// under the per-connection serving goroutines; NewSFTPServer sets acl up front
+// for the production path.
+func (s *SFTPServer) protocolACL() *httpserver.ProtocolACL {
+	if s.acl != nil {
+		return s.acl
+	}
+	return httpserver.NewProtocolACL(s.Root)
 }
 
 // Bind acquires the listening socket so a port conflict is reported to the
