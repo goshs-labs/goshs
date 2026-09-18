@@ -31,11 +31,11 @@ export function initContextMenu() {
       closeCtx();
     };
     document.getElementById("ctx-share").onclick = () => {
-      shareFile(name);
+      shareFile(tr.dataset.value);
       closeCtx();
     };
     document.getElementById("ctx-delete").onclick = () => {
-      deleteFile(name);
+      deleteFile(tr.dataset.value);
       closeCtx();
     };
     menu.style.left = Math.min(e.clientX, window.innerWidth - 180) + "px";

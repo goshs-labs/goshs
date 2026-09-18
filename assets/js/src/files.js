@@ -10,8 +10,15 @@ export function filterFiles() {
   const q = document.getElementById("file-search").value.toLowerCase();
   document.querySelectorAll("#file-tbody tr").forEach((tr) => {
     const name = (tr.dataset.name || "").toLowerCase();
-    tr.style.display = !q || name.includes(q) ? "" : "none";
+    const visible = !q || name.includes(q);
+    tr.style.display = visible ? "" : "none";
+    // Deselect hidden rows so bulk actions only affect visible items
+    if (!visible) {
+      const cb = tr.querySelector(".row-check-item");
+      if (cb) cb.checked = false;
+    }
   });
+  updateBulkBar();
 }
 
 let sortDir = { name: true, size: true, mtime: true };
@@ -19,7 +26,12 @@ export function sortTable(col) {
   const asc = (sortDir[col] = !sortDir[col]);
   const tbody = document.getElementById("file-tbody");
   const rows = Array.from(tbody.querySelectorAll("tr[data-name]"));
-  rows.sort((a, b) => {
+
+  // Extract the ".." parent row so it stays pinned at the top
+  const parentRow = rows.find((r) => r.dataset.name === "..");
+  const sortableRows = parentRow ? rows.filter((r) => r !== parentRow) : rows;
+
+  sortableRows.sort((a, b) => {
     let va = a.dataset[col] || "",
       vb = b.dataset[col] || "";
     if (col === "size" || col === "mtime") {
@@ -29,7 +41,17 @@ export function sortTable(col) {
     }
     return asc ? va.localeCompare(vb) : vb.localeCompare(va);
   });
-  rows.forEach((r) => tbody.appendChild(r));
+
+  // Re-append: ".." first (if it exists), then sorted rows
+  if (parentRow) tbody.appendChild(parentRow);
+  sortableRows.forEach((r) => tbody.appendChild(r));
+
+  // Persist sort preference via ST so it survives navigation
+  ST.sortCol = col;
+  ST.sortAsc = asc;
+  localStorage.setItem("goshs-sort-col", col);
+  localStorage.setItem("goshs-sort-asc", String(asc));
+
   document.querySelectorAll(".file-table th[id]").forEach((th) => {
     th.classList.remove("sorted");
     th.querySelector(".sort-arrow").textContent = "↕";
@@ -41,7 +63,21 @@ export function sortTable(col) {
   }
 }
 
-function toggleAllChecks(el) {
+export function applyDefaultSort() {
+  // Restore persisted sort preference, fall back to mtime
+  const col = localStorage.getItem("goshs-sort-col") || "mtime";
+  const savedAsc = localStorage.getItem("goshs-sort-asc");
+  if (savedAsc !== null) {
+    sortDir[col] = savedAsc === "true";
+  } else {
+    sortDir[col] = true;
+  }
+  ST.sortCol = col;
+  ST.sortAsc = sortDir[col];
+  sortTable(col);
+}
+
+export function toggleAllChecks(el) {
   document
     .querySelectorAll(".row-check-item")
     .forEach((c) => (c.checked = el.checked));
@@ -92,11 +128,20 @@ export function downloadBulk() {
   updateBulkBar();
   downloadSelected();
 }
-function deleteSelected() {
+export function deleteSelected() {
   const vals = getSelectedValues();
   if (!vals.length) return;
   if (!confirm(`Delete ${vals.length} item(s)?`)) return;
-  Promise.all(vals.map((val) => deleteFile(val, true)))
+
+  const promises = vals.map((val) => {
+    let url = location.protocol + "//" + window.location.host + (val.startsWith("/") ? val : "/" + val);
+    return fetch(url, {
+      method: "DELETE",
+      headers: { "X-CSRF-Token": getCsrfToken() },
+    });
+  });
+
+  Promise.all(promises)
     .then(() => location.reload())
     .catch(() => toast("Delete failed", "error"));
 }
@@ -111,6 +156,7 @@ export function deleteFile(path, bulk) {
     : (ok = true);
 
   if (ok) {
+    path = path.startsWith("/") ? path : "/" + path;
     var url = "";
     location.protocol !== "https:"
       ? (url = "http://" + window.location.host + path)
@@ -339,4 +385,5 @@ function initDrop() {
 
 export function initFiles() {
   initDrop();
+  applyDefaultSort();
 }
