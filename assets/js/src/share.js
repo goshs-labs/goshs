@@ -56,8 +56,8 @@ export function showQR(path) {
     ? (url = "http://" + window.location.host)
     : (url = "https://" + window.location.host);
 
-  path = path.replaceAll("//", "/");
-  const link = `${url}/${path}`.replaceAll("//", "/");
+  path = path.replace(/^\//, "").replaceAll("//", "/");
+  const link = `${url}/${path}`;
 
   // Generate QR code on canvas
   new QRious({

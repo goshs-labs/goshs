@@ -9,8 +9,9 @@ import {
 } from "./collab.js";
 import {
   navigateTo, filterFiles, sortTable, clearSelection,
-  downloadSelected, downloadBulk, deleteFile, updateBulkBar,
+  downloadSelected, downloadBulk, deleteFile, deleteSelected, updateBulkBar,
   startUpload, openUpload, openMkdir, handleFileSelect, createDir, removeUpload,
+  toggleAllChecks,
 } from "./files.js";
 import {
   toggleTheme, filterEmbedded, sortEmbedded, copyEmbLink,
@@ -43,8 +44,9 @@ Object.assign(window, {
   openHTMLPreview, openLightbox, toggleHTTPDetail,
   previewFile,
   navigateTo, filterFiles, sortTable, clearSelection,
-  downloadSelected, downloadBulk, deleteFile,
+  downloadSelected, downloadBulk, deleteFile, deleteSelected,
   updateBulkBar, startUpload, openUpload, openMkdir, handleFileSelect, createDir, removeUpload,
+  toggleAllChecks,
   sendChat, copyMessage, deleteMessage, downloadChat, setNick,
   reactMessage, toggleReactionPicker, cancelEdit,
   openChatUpload, handleChatFile, toggleNotifications,
