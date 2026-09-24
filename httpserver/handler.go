@@ -754,15 +754,15 @@ func (fileS *FileServer) processDir(w http.ResponseWriter, req *http.Request, fi
 
 	// if ?json output json listing
 	if jsonOutput {
-		if fileS.Silent {
-			fileS.handleError(w, req, fmt.Errorf("%s", "json output deactivated in silent mode"), http.StatusNotFound)
+		if fileS.Silent || fileS.NoWebListing {
+			fileS.handleError(w, req, fmt.Errorf("%s", "json output deactivated"), http.StatusNotFound)
 			return
 		}
 		returnJsonDirListing(w, items)
 		return
 	}
 
-	if fileS.Silent {
+	if fileS.Silent || fileS.NoWebListing {
 		fileS.constructSilent(w)
 	} else {
 		fileS.constructDefault(w, relpath, items, embeddedItems)

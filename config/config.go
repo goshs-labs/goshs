@@ -93,6 +93,7 @@ type Config struct {
 	TTL                 int      `json:"ttl"`
 	TUI                 bool     `json:"tui"`
 	Template            bool     `json:"template"`
+	NoWebListing      bool     `json:"no_web_listing"`
 	TemplateVars        []string `json:"template_vars"`
 }
 
@@ -185,6 +186,7 @@ func LoadConfig(opts *options.Options) (*options.Options, error) {
 	opts.TUI = cfg.TUI
 	opts.Template = cfg.Template
 	opts.TemplateVars = cfg.TemplateVars
+	opts.NoWebListing = cfg.NoWebListing
 
 	// Default upload folder to webroot if not set in config
 	if opts.UploadFolder == "" {
@@ -264,6 +266,7 @@ func PrintExample() (string, error) {
 		TTL:                 0,
 		TUI:                 false,
 		Template:            false,
+		NoWebListing:      false,
 		TemplateVars:        []string{},
 	}
 
