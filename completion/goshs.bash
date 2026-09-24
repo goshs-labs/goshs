@@ -10,7 +10,7 @@ _goshs() {
 -i --ip -p --port -d --dir -w --webdav -wp --webdav-port \
 -ro --read-only -uo --upload-only -uf --upload-folder -mu --max-upload \
 -nc --no-chat -pc --persist-chat -pci --persist-chat-images \
--nd --no-delete -si --silent -I --invisible --ttl --tui \
+-nd --no-delete -si --silent -nwl --no-web-listing -I --invisible --ttl --tui \
 --template --tpl-var \
 -c --cli --catcher -rc -e --embedded -o --output -t --tunnel \
 -s --ssl -ss --self-signed -sk --server-key -sc --server-cert \

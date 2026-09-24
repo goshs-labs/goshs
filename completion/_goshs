@@ -20,6 +20,7 @@ _goshs() {
         '(-pci --persist-chat-images)'{-pci,--persist-chat-images}'[Write pasted chat images to disk]' \
         '(-nd --no-delete)'{-nd,--no-delete}'[Disable delete option]' \
         '(-si --silent)'{-si,--silent}'[Run without directory listing]' \
+        '(-nwl --no-web-listing)'{-nwl,--no-web-listing}'[Disable the directory listing page]' \
         '(-I --invisible)'{-I,--invisible}'[Invisible mode]' \
         '--ttl[Self-destruct after this duration (e.g. 30m, 2h; 0 disables)]:duration' \
         '--tui[Run the interactive terminal dashboard]' \

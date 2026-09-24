@@ -87,6 +87,7 @@ func NewHttpServer(opts *options.Options, hub *ws.Hub, ch *chat.Chat, wl *Whitel
 		NoDelete:          opts.NoDelete,
 		Silent:            opts.Silent,
 		Invisible:         opts.Invisible,
+		NoWebListing:      opts.NoWebListing,
 		Embedded:          opts.Embedded,
 		Verbose:           opts.Verbose,
 		Tunnel:            opts.Tunnel,

@@ -89,6 +89,7 @@ type Options struct {
 	TFTPPort            int               // 69
 	TTL                 time.Duration     // 0 = disabled, otherwise self-destruct after this duration
 	TUI                 bool              // false — run the interactive terminal dashboard
+	NoWebListing      bool              // false — disable the HTML directory listing page (files still served directly)
 	Template            bool              // false — enable ?tpl payload templating
 	TemplateVars        []string          // raw KEY=VALUE entries from --tpl-var / config
 	TemplateVarsParsed  map[string]string // parsed in sanity.FurtherProcessing
@@ -187,6 +188,8 @@ func Parse() (*Options, bool) {
 	flag.BoolVar(&opts.MDNS, "mdns", false, "Enable zeroconf mDNS registration")
 	flag.BoolVar(&opts.Invisible, "I", false, "Enable invisible mode")
 	flag.BoolVar(&opts.Invisible, "invisible", false, "Enable invisible mode")
+	flag.BoolVar(&opts.NoWebListing, "nwl", false, "Disable HTML directory listing")
+	flag.BoolVar(&opts.NoWebListing, "no-web-listing", false, "Disable HTML directory listing")
 	flag.BoolVar(&opts.Tunnel, "t", false, "Enable tunnel")
 	flag.BoolVar(&opts.Tunnel, "tunnel", false, "Enable tunnel")
 	flag.BoolVar(&opts.DNS, "dns", false, "Enable DNS server")
@@ -288,6 +291,7 @@ Web server options:
   -pci,--persist-chat-images  Write pasted chat images to disk   (default: false)
   -nd, --no-delete      Disable the delete option                 (default: false)
   -si, --silent         Running without dir listing               (default: false)
+  -nwl,--no-web-listing Disable the directory listing page         (default: false)
   -I,  --invisible      Invisible mode                            (default: false)
   -c,  --cli            Enable cli (only with auth and tls)       (default: false)
   --catcher, -rc        Enable reverse shell catcher              (default: false)

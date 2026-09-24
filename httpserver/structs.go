@@ -83,6 +83,7 @@ type FileServer struct {
 	NoDelete          bool
 	Silent            bool
 	Invisible         bool
+	NoWebListing      bool
 	Embedded          bool
 	Verbose           bool
 	Webhook           webhook.Webhook
