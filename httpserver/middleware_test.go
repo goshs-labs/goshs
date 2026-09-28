@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -68,6 +69,84 @@ func TestVerifyCredentials_FailureAfterLockoutExpiryDoesNotRelock(t *testing.T) 
 	require.NotNil(t, entry)
 	require.Equal(t, 1, entry.count, "counter should reset after lockout expiry, then count this failure as the first")
 	require.True(t, entry.lockedUntil.IsZero(), "a single post-expiry failure must not re-lock")
+}
+
+// GHSA-8f9w-966j-qhq9: a concurrent burst of wrong-password requests from a
+// fresh IP must not slip past the lockout. The check and the counter update
+// used to sit in separate critical sections around the (slow) bcrypt compare,
+// so every request in the burst saw count==0 and the stored count ended at 1.
+func TestVerifyCredentials_ConcurrentBurstIsLockedOut(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.DefaultCost)
+	require.NoError(t, err)
+	fs := newFS("admin", string(hash))
+
+	const burst = 50
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < burst; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.RemoteAddr = "10.0.0.1:12345"
+			r.Header.Set("Authorization", basicAuthHeader("admin", "wrong"))
+			<-start
+			_, ok := fs.verifyCredentials(r)
+			require.False(t, ok)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	entry := fs.authFailures["10.0.0.1"]
+	require.NotNil(t, entry)
+	require.Equal(t, authMaxFailures, entry.count,
+		"only authMaxFailures attempts may reach credential verification; the rest must be refused up front")
+	require.False(t, entry.lockedUntil.IsZero(), "the burst must trigger the lockout")
+
+	// The client is now locked out: even the correct password is refused.
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.1:12345"
+	r.Header.Set("Authorization", basicAuthHeader("admin", "secret"))
+	_, ok := fs.verifyCredentials(r)
+	require.False(t, ok, "locked-out client must be refused even with valid credentials")
+}
+
+// Attempts that are in flight count against the budget: once failures plus
+// in-flight attempts reach the limit, further requests are refused without
+// verification, and the lockout is armed when the in-flight attempt fails.
+func TestVerifyCredentials_InFlightAttemptsCountAgainstBudget(t *testing.T) {
+	fs := newFS("user", "pass")
+	fs.authFailures = map[string]*authFailEntry{
+		"192.0.2.1": {count: authMaxFailures}, // budget exhausted, not yet locked
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Authorization", basicAuthHeader("user", "pass"))
+	_, ok := fs.verifyCredentials(r)
+	require.False(t, ok, "request beyond the attempt budget must be refused even with valid credentials")
+	require.Equal(t, authMaxFailures, fs.authFailures["192.0.2.1"].count, "a refused request must not reserve an attempt")
+}
+
+// A successful login still clears the failure record, and a failing request
+// whose record was cleared concurrently must not resurrect a stale entry.
+func TestVerifyCredentials_SuccessClearsReservations(t *testing.T) {
+	fs := newFS("user", "pass")
+	fs.authFailures = map[string]*authFailEntry{
+		"192.0.2.1": {count: authMaxFailures - 1},
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Authorization", basicAuthHeader("user", "pass"))
+	_, ok := fs.verifyCredentials(r)
+	require.True(t, ok)
+	require.NotContains(t, fs.authFailures, "192.0.2.1")
+
+	r = httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Authorization", basicAuthHeader("user", "wrong"))
+	_, ok = fs.verifyCredentials(r)
+	require.False(t, ok)
+	require.Equal(t, 1, fs.authFailures["192.0.2.1"].count, "counting restarts after a successful login")
 }
 
 func TestBasicAuthMiddleware_NoAuthHeader(t *testing.T) {

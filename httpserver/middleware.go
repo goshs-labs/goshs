@@ -37,34 +37,49 @@ func (fs *FileServer) verifyCredentials(r *http.Request) (authVal string, ok boo
 		return authVal, true
 	}
 
+	username, password, authOK := r.BasicAuth()
+	if !authOK {
+		return "", false
+	}
+
 	// Rate-limit check: reject IPs that have exceeded the failure threshold.
 	// Use the resolved client IP (honours X-Forwarded-For for trusted proxies)
 	// so that clients behind a reverse proxy each have their own counter.
+	//
+	// The attempt is reserved (counted) in the same critical section as the
+	// check, *before* the credentials are verified, so concurrent requests
+	// cannot all pass the check while the counter still reads low
+	// (GHSA-8f9w-966j-qhq9). A successful login clears the record again.
 	clientIP := GetClientIP(r, fs.Whitelist)
 	fs.authFailMu.Lock()
 	if fs.authFailures == nil {
 		fs.authFailures = make(map[string]*authFailEntry)
 	}
 	entry := fs.authFailures[clientIP]
-	if entry != nil {
-		if time.Now().Before(entry.lockedUntil) {
-			fs.authFailMu.Unlock()
-			logger.Warnf("[AUTH] %s is locked out due to repeated failures", clientIP)
-			return "", false
-		}
-		// Lockout has elapsed — reset the counter so the client starts fresh
-		// instead of being re-locked by a single subsequent failure.
-		if !entry.lockedUntil.IsZero() {
-			entry.count = 0
-			entry.lockedUntil = time.Time{}
-		}
+	if entry == nil {
+		entry = &authFailEntry{}
+		fs.authFailures[clientIP] = entry
 	}
-	fs.authFailMu.Unlock()
-
-	username, password, authOK := r.BasicAuth()
-	if !authOK {
+	if time.Now().Before(entry.lockedUntil) {
+		fs.authFailMu.Unlock()
+		logger.Warnf("[AUTH] %s is locked out due to repeated failures", clientIP)
 		return "", false
 	}
+	// Lockout has elapsed — reset the counter so the client starts fresh
+	// instead of being re-locked by a single subsequent failure.
+	if !entry.lockedUntil.IsZero() {
+		entry.count = 0
+		entry.lockedUntil = time.Time{}
+	}
+	// The whole attempt budget is already taken by failures and in-flight
+	// attempts: refuse without verifying.
+	if entry.count >= authMaxFailures {
+		fs.authFailMu.Unlock()
+		logger.Warnf("[AUTH] %s is locked out due to repeated failures", clientIP)
+		return "", false
+	}
+	entry.count++
+	fs.authFailMu.Unlock()
 
 	var verified bool
 	if strings.HasPrefix(fs.Pass, "$2a$") {
@@ -77,18 +92,12 @@ func (fs *FileServer) verifyCredentials(r *http.Request) (authVal string, ok boo
 	}
 
 	if !verified {
+		// The attempt was already counted above. Re-read the map rather than
+		// reusing entry: a concurrent successful login may have cleared it.
 		fs.authFailMu.Lock()
-		if fs.authFailures == nil {
-			fs.authFailures = make(map[string]*authFailEntry)
-		}
-		if entry == nil {
-			entry = &authFailEntry{}
-			fs.authFailures[clientIP] = entry
-		}
-		entry.count++
-		if entry.count >= authMaxFailures {
-			entry.lockedUntil = time.Now().Add(authLockDuration)
-			logger.Warnf("[AUTH] %s locked out after %d failed attempts", clientIP, entry.count)
+		if e := fs.authFailures[clientIP]; e != nil && e.count >= authMaxFailures && e.lockedUntil.IsZero() {
+			e.lockedUntil = time.Now().Add(authLockDuration)
+			logger.Warnf("[AUTH] %s locked out after %d failed attempts", clientIP, e.count)
 		}
 		fs.authFailMu.Unlock()
 		return "", false
