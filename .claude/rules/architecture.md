@@ -275,7 +275,11 @@ matching update.
 
 - **ACL / auth** in `httpserver/`: `.goshs` per-directory auth/block files,
   `aclSatisfied()` (response-safe ACL checks), `verifyCredentials` (brute-force
-  lockout with reset-after-duration), `sanitizePath` (path traversal; deliberately
+  lockout with reset-after-duration; the attempt is **reserved** — counted — in the
+  same critical section as the lockout check, *before* the bcrypt compare, and the
+  failure path re-reads the map instead of reusing the entry pointer. Splitting
+  check and update let concurrent bursts bypass the lockout — **GHSA-8f9w-966j-qhq9**;
+  tests in `httpserver/middleware_test.go`), `sanitizePath` (path traversal; deliberately
   does **not** double-URL-decode, to preserve literal `%`/`+` in filenames).
 - **The `.goshs` per-folder ACL must be enforced on *every* protocol that serves the
   webroot, not just HTTP.** HTTP uses `applyCustomAuth`/`aclSatisfied`; WebDAV uses
