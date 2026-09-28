@@ -4,6 +4,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      # init/autobuild/analyze/upload-sarif must move to the same sha together,
+      # otherwise the CodeQL workflow fails on each split PR.
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
 
   - package-ecosystem: gomod
     directory: /
