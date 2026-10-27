@@ -982,11 +982,25 @@ func (s *SMBServer) handleCreate(cs *connState, h *smb2Hdr, buf []byte) []byte {
 	// Alternate Data Streams (e.g. "file.txt:Zone.Identifier:$DATA") are not
 	// supported on Linux.  Return a null-sink handle so Windows silently discards
 	// the stream instead of showing an error or leaving a stray colon-file on disk.
-	if strings.Contains(relPath, ":") {
+	// The name is still contained and ACL-checked (GHSA-4wmw-c376-phcm): a raw
+	// name like `C:\x` or `../a:b` must never reach a filesystem sink.
+	if i := strings.Index(relPath, ":"); i >= 0 {
+		localPath, err := s.safePath(tree.RootPath, relPath)
+		if err != nil {
+			return errResp(h, STATUS_OBJECT_PATH_NOT_FOUND)
+		}
+		basePath, err := s.safePath(tree.RootPath, relPath[:i])
+		if err != nil {
+			return errResp(h, STATUS_OBJECT_PATH_NOT_FOUND)
+		}
+		if !s.protocolACL().Allowed(basePath) {
+			logger.Debugf("SMB: CREATE ADS denied by .goshs ACL: %s", basePath)
+			return errResp(h, STATUS_OBJECT_NAME_NOT_FOUND)
+		}
 		hID := cs.newHandleID()
 		handle := &smbHandle{
 			ID:         hID,
-			Path:       relPath,
+			Path:       localPath,
 			IsNullSink: true,
 		}
 		cs.addHandle(handle)
@@ -1407,7 +1421,8 @@ func (s *SMBServer) handleClose(cs *connState, h *smb2Hdr, buf []byte) []byte {
 		if handle.File != nil {
 			handle.File.Close()
 		}
-		if handle.DeleteOnClose {
+		// A null-sink handle never owns a file on disk, so there is nothing to delete.
+		if handle.DeleteOnClose && !handle.IsNullSink {
 			if s.UploadOnly || s.NoDelete {
 				mode := "no-delete"
 				if s.UploadOnly {
@@ -2193,7 +2208,13 @@ func (s *SMBServer) handleSetInfo(cs *connState, h *smb2Hdr, buf []byte) []byte 
 		return errResp(h, STATUS_INVALID_PARAMETER)
 	}
 
-	if infoType == SMB2_0_INFO_FILE {
+	// ADS null-sink handles have no backing file: accept and discard every
+	// SET_INFO except rename, so delete/rename never act on their path.
+	if handle.IsNullSink && infoType == SMB2_0_INFO_FILE && infoClass == FileRenameInformation {
+		return errResp(h, STATUS_ACCESS_DENIED)
+	}
+
+	if infoType == SMB2_0_INFO_FILE && !handle.IsNullSink {
 		switch infoClass {
 		case FileBasicInformation:
 			// 40-byte structure: CreationTime(8), LastAccessTime(8), LastWriteTime(8),

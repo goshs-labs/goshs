@@ -324,7 +324,12 @@ matching update.
   fs in the outermost `aclFs` (also implements ftpserverlib's `ReadDir` extension to
   filter listings), and SMB checks in `handleCreate` (every handle is born there),
   the rename destination in `handleSetInfo`, and filters `handleQueryDir` via
-  `FilterDirEntries`. `Allowed()` also rejects any `.goshs` path *component*. Tests:
+  `FilterDirEntries`. `Allowed()` also rejects any `.goshs` path *component*. SMB's
+  ADS null-sink branch (names containing `:`, e.g. `Zone.Identifier`) must also go
+  through `safePath` + `Allowed()` (on the pre-colon base) and store the *contained*
+  path; null-sink handles are never deleted on CLOSE and refuse rename in SET_INFO —
+  the raw-path shortcut allowed out-of-share deletion/move, **GHSA-4wmw-c376-phcm**
+  (`smbserver/ads_nullsink_test.go`). Tests:
   `{tftpserver,ftpserver,smbserver}/acl_test.go`. When adding a new read/transfer
   protocol, wire `ProtocolACL` or you reopen this class.
 - **`findEffectiveACL` fails closed.** A `.goshs` that cannot be read/parsed (incl. a
