@@ -174,6 +174,7 @@ These are the awesome contributors that made `goshs` even more secure :heart:
   <td align="center"><a href="https://github.com/FrogApprentice"><img src="https://github.com/FrogApprentice.png?size=50" width="50" height="50"></a></td>
   <td align="center"><a href="https://github.com/xherogasm"><img src="https://github.com/xherogasm.png?size=50" width="50" height="50"></a></td>
   <td align="center"><a href="https://github.com/ray910408"><img src="https://github.com/ray910408.png?size=50" width="50" height="50"></a></td>
+  <td align="center"><a href="https://github.com/ozp3"><img src="https://github.com/ozp3.png?size=50" width="50" height="50"></a></td>
 </tr></table>
 
 # Community
