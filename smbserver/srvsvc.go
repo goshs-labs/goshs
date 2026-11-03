@@ -40,7 +40,7 @@ const (
 func (s *SMBServer) handlePipeWrite(handle *smbHandle, data []byte) []byte {
 	// Dump the full PDU (up to 200 bytes) so we can see all 3 contexts.
 	dumpLen := min(len(data), 200)
-	logger.Debugf("SMB: pipeWrite pipe=%q dataLen=%d hdr=%X", handle.Path, len(data), data[:dumpLen])
+	logger.Debugf("SMB: pipeWrite pipe=%q dataLen=%d hdr=%X", handle.PipeName, len(data), data[:dumpLen])
 
 	var out []byte
 	for len(data) >= 16 {
@@ -59,7 +59,7 @@ func (s *SMBServer) handlePipeWrite(handle *smbHandle, data []byte) []byte {
 		var resp []byte
 		switch pktType {
 		case rpcBind:
-			resp = s.buildBindAck(callID, pdu, handle.Path)
+			resp = s.buildBindAck(callID, pdu, handle.PipeName)
 			if resp != nil {
 				dumpB := min(len(resp), 256)
 				logger.Debugf("SMB: pipeWrite BindAck len=%d full=%X", len(resp), resp[:dumpB])
@@ -193,9 +193,9 @@ func (s *SMBServer) handleRPCRequest(handle *smbHandle, callID uint32, req []byt
 	}
 	opnum := binary.LittleEndian.Uint16(req[22:24])
 	stub := req[24:]
-	pipeName := strings.ToLower(strings.TrimLeft(strings.ReplaceAll(handle.Path, "\\", "/"), "/"))
+	pipeName := strings.ToLower(strings.TrimLeft(strings.ReplaceAll(handle.PipeName, "\\", "/"), "/"))
 
-	logger.Debugf("SMB: RPC pipe=%s opnum=%d callID=%d", handle.Path, opnum, callID)
+	logger.Debugf("SMB: RPC pipe=%s opnum=%d callID=%d", handle.PipeName, opnum, callID)
 
 	switch pipeName {
 	case "srvsvc", "pipe/srvsvc":
@@ -221,7 +221,7 @@ func (s *SMBServer) handleRPCRequest(handle *smbHandle, callID uint32, req []byt
 			return buildRPCFault(callID)
 		}
 	default:
-		logger.Debugf("SMB: RPC unknown pipe %q opnum=%d", handle.Path, opnum)
+		logger.Debugf("SMB: RPC unknown pipe %q opnum=%d", handle.PipeName, opnum)
 		return buildRPCFault(callID)
 	}
 }

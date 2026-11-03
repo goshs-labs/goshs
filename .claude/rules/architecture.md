@@ -329,7 +329,11 @@ matching update.
   through `safePath` + `Allowed()` (on the pre-colon base) and store the *contained*
   path; null-sink handles are never deleted on CLOSE and refuse rename in SET_INFO —
   the raw-path shortcut allowed out-of-share deletion/move, **GHSA-4wmw-c376-phcm**
-  (`smbserver/ads_nullsink_test.go`). Tests:
+  (`smbserver/ads_nullsink_test.go`). Likewise `IPC$` pipe handles keep the
+  client-supplied pipe name in `smbHandle.PipeName`, **never** `Path` (which stays
+  empty), all SET_INFO on a pipe is refused, and CLOSE never deletes a pipe handle —
+  storing the raw pipe name as `Path` gave unauthenticated arbitrary file deletion via
+  disposition + CLOSE, **GHSA-p6c9-h3f7-xq9f** (`smbserver/ipc_pipe_test.go`). Tests:
   `{tftpserver,ftpserver,smbserver}/acl_test.go`. When adding a new read/transfer
   protocol, wire `ProtocolACL` or you reopen this class.
 - **`findEffectiveACL` fails closed.** A `.goshs` that cannot be read/parsed (incl. a
