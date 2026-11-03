@@ -35,6 +35,7 @@ type smbHandle struct {
 	File                 *os.File
 	IsDir                bool
 	IsPipe               bool
+	PipeName             string        // IPC$ pipe name; never a filesystem path (Path stays empty for pipes)
 	PipeResp             []byte        // buffered response for next READ
 	DirEntries           []os.DirEntry // cached listing for QueryDirectory
 	DirIndex             int           // current position in DirEntries

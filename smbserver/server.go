@@ -950,10 +950,12 @@ func (s *SMBServer) handleCreate(cs *connState, h *smb2Hdr, buf []byte) []byte {
 			pipeName = fromUTF16LE(buf[nameOff : nameOff+nameLen])
 		}
 		hID := cs.newHandleID()
+		// The pipe name is client-controlled: keep it out of Path so no
+		// filesystem sink (delete-on-close, rename, ...) can ever act on it.
 		handle := &smbHandle{
-			ID:     hID,
-			Path:   pipeName,
-			IsPipe: true,
+			ID:       hID,
+			PipeName: pipeName,
+			IsPipe:   true,
 		}
 		cs.addHandle(handle)
 		logger.Debugf("SMB: pipe opened: %s (hID=%d)", pipeName, hID)
@@ -1421,8 +1423,8 @@ func (s *SMBServer) handleClose(cs *connState, h *smb2Hdr, buf []byte) []byte {
 		if handle.File != nil {
 			handle.File.Close()
 		}
-		// A null-sink handle never owns a file on disk, so there is nothing to delete.
-		if handle.DeleteOnClose && !handle.IsNullSink {
+		// Null-sink and pipe handles never own a file on disk, so there is nothing to delete.
+		if handle.DeleteOnClose && !handle.IsNullSink && !handle.IsPipe {
 			if s.UploadOnly || s.NoDelete {
 				mode := "no-delete"
 				if s.UploadOnly {
@@ -1905,7 +1907,7 @@ func (s *SMBServer) handleQueryInfo(cs *connState, h *smb2Hdr, buf []byte) []byt
 				info = make([]byte, 104)             // fixed-size stub
 				putle32(info, 56, handle.AccessMask) // AccessInformation.AccessFlags
 			case FileNameInformation:
-				nameUTF16 := toUTF16LE(filepath.Base(handle.Path))
+				nameUTF16 := toUTF16LE(filepath.Base(handle.PipeName))
 				info = make([]byte, 4+len(nameUTF16))
 				putle32(info, 0, uint32(len(nameUTF16)))
 				copy(info[4:], nameUTF16)
@@ -2211,6 +2213,11 @@ func (s *SMBServer) handleSetInfo(cs *connState, h *smb2Hdr, buf []byte) []byte 
 	// ADS null-sink handles have no backing file: accept and discard every
 	// SET_INFO except rename, so delete/rename never act on their path.
 	if handle.IsNullSink && infoType == SMB2_0_INFO_FILE && infoClass == FileRenameInformation {
+		return errResp(h, STATUS_ACCESS_DENIED)
+	}
+	// Named pipes have no backing file: refuse every SET_INFO so delete
+	// (FileDisposition), rename and truncate can never reach the filesystem.
+	if handle.IsPipe {
 		return errResp(h, STATUS_ACCESS_DENIED)
 	}
 
