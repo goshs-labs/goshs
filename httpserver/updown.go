@@ -46,8 +46,10 @@ func (fs *FileServer) put(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Block overwriting the .goshs ACL file
-	if strings.EqualFold(filepath.Base(savepath), ".goshs") {
+	// Block overwriting the .goshs ACL file, including its trailing-dot/space
+	// and 8.3 alias spellings, which Windows opens as the real file
+	// (GHSA-8v6q-gvgc-m3vq).
+	if isACLFilePath(savepath) {
 		fs.handleError(w, req, fmt.Errorf("cannot overwrite ACL file"), http.StatusForbidden)
 		return
 	}

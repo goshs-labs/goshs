@@ -2309,6 +2309,11 @@ func (s *SMBServer) handleSetInfo(cs *connState, h *smb2Hdr, buf []byte) []byte 
 				return errResp(h, STATUS_ACCESS_DENIED)
 			}
 			oldPath := handle.Path
+			// A directory must not be moved out of the .goshs scope that
+			// protects its contents (GHSA-95fx-g5c4-6f8f).
+			if !s.protocolACL().RenameAllowed(oldPath, newPath) {
+				return errResp(h, STATUS_ACCESS_DENIED)
+			}
 			// NO-DELETE / UPLOAD-ONLY: os.Rename silently clobbers an existing
 			// destination, destroying that file's contents. Refuse to overwrite a
 			// protected pre-existing destination.

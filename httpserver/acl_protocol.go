@@ -282,3 +282,54 @@ func (fs *FileServer) subtreeRemovable(absPath string, satisfied func(configFile
 	})
 	return ok && walkErr == nil
 }
+
+// RenameAllowed reports whether a credential-less protocol client may rename
+// oldAbs to newAbs (SFTP Rename, FTP RNFR/RNTO, SMB FileRenameInformation).
+// Allowed only checks the two addressed paths; see subtreeMovable for why that
+// is not enough for a directory (GHSA-95fx-g5c4-6f8f).
+func (p *ProtocolACL) RenameAllowed(oldAbs, newAbs string) bool {
+	return p.fs.subtreeMovable(oldAbs, newAbs, func(acl configFile) bool { return acl.Auth == "" })
+}
+
+// subtreeMovable reports whether renaming the directory oldAbs to newAbs keeps
+// every .goshs constraint on its contents in force. Block entries and inherited
+// auth are declared in an *ancestor* and resolved upwards, so moving a
+// directory out from under the declaring .goshs silently dropped them: a
+// block-listed file below an unprotected directory became readable at the new
+// path (GHSA-95fx-g5c4-6f8f, the rename residual of GHSA-rf62-vgq5-ggq5).
+//
+// A .goshs inside the subtree travels with it, so only what the old parent
+// contributes can be lost. The rename is therefore allowed when either nothing
+// below oldAbs is protected (subtreeRemovable), or the new parent imposes at
+// least the old parent's constraints: the same Auth (if any) and a superset of
+// its block list. The directory itself must not be block-listed under its old
+// name, since renaming it would shed that entry. A non-directory (or missing)
+// oldAbs has nothing below it and is left to the caller's addressed-path checks.
+func (fs *FileServer) subtreeMovable(oldAbs, newAbs string, satisfied func(configFile) bool) bool {
+	root := filepath.Clean(oldAbs)
+	info, err := os.Lstat(root)
+	if err != nil || !info.IsDir() {
+		return true
+	}
+	if fs.subtreeRemovable(root, satisfied) {
+		return true
+	}
+	src, srcErr := fs.findEffectiveACL(filepath.Dir(root))
+	dst, dstErr := fs.findEffectiveACL(filepath.Dir(filepath.Clean(newAbs)))
+	if srcErr != nil || dstErr != nil {
+		return false
+	}
+	base := canonicalBaseName(root)
+	if blockListed(src.Block, base) || blockListed(src.Block, base+"/") {
+		return false
+	}
+	if src.Auth != "" && dst.Auth != src.Auth {
+		return false
+	}
+	for _, b := range src.Block {
+		if !blockListed(dst.Block, b) {
+			return false
+		}
+	}
+	return true
+}

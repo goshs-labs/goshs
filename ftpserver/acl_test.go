@@ -84,3 +84,19 @@ func TestACLFs_RemoveAllAncestorOfProtectedDenied(t *testing.T) {
 	require.NoError(t, fs.RemoveAll("/plain"))
 	require.NoDirExists(t, filepath.Join(root, "plain"))
 }
+
+// GHSA-95fx-g5c4-6f8f: RNFR/RNTO of a directory must not move a block-listed
+// file out of the .goshs scope that hides it.
+func TestACLFs_RenameOutOfBlockScopeDenied(t *testing.T) {
+	fs, root := newACLFs(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "pub", "sub"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "pub", ".goshs"), []byte(`{"block":["flag.txt"]}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "pub", "sub", "flag.txt"), []byte("FLAG"), 0644))
+
+	require.ErrorIs(t, fs.Rename("/pub/sub", "/moved"), errACLDenied)
+	require.FileExists(t, filepath.Join(root, "pub", "sub", "flag.txt"))
+
+	require.NoError(t, fs.Rename("/pub/sub", "/pub/sub2"))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "plain"), 0755))
+	require.NoError(t, fs.Rename("/plain", "/plain2"))
+}

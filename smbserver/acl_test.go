@@ -99,3 +99,27 @@ func TestHandleQueryDir_FiltersListing(t *testing.T) {
 		require.False(t, strings.Contains(listing, hidden), "listing must not reveal %q", hidden)
 	}
 }
+
+// GHSA-95fx-g5c4-6f8f: FileRenameInformation on a directory must not move a
+// block-listed file out of the .goshs scope that hides it.
+func TestHandleSetInfo_RenameDirOutOfBlockScopeDenied(t *testing.T) {
+	root := smbACLTree(t)
+	sub := filepath.Join(root, "pub", "sub")
+	require.NoError(t, os.MkdirAll(sub, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "pub", ".goshs"), []byte(`{"block":["flag.txt"]}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(sub, "flag.txt"), []byte("FLAG"), 0644))
+	s := &SMBServer{Root: root}
+	cs := newConnState()
+	cs.addTree(&smbTree{ID: 1, ShareName: "goshs", RootPath: root})
+	hID := cs.newHandleID()
+	cs.addHandle(&smbHandle{ID: hID, Path: sub, IsDir: true})
+
+	h := &smb2Hdr{Command: SMB2_SET_INFO, TreeID: 1}
+	resp := s.handleSetInfo(cs, h, renameFrame(hID, `moved`))
+	require.Equal(t, STATUS_ACCESS_DENIED, respStatus(resp))
+	require.FileExists(t, filepath.Join(sub, "flag.txt"))
+
+	resp = s.handleSetInfo(cs, h, renameFrame(hID, `pub\sub2`))
+	require.Equal(t, STATUS_SUCCESS, respStatus(resp))
+	require.FileExists(t, filepath.Join(root, "pub", "sub2", "flag.txt"))
+}

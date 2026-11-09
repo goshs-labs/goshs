@@ -341,6 +341,11 @@ func (fs *aclFs) Rename(oldname, newname string) error {
 	if err := fs.check(oldname, newname); err != nil {
 		return err
 	}
+	// check only covers the two paths; a directory must not be moved out of
+	// the .goshs scope protecting its contents (GHSA-95fx-g5c4-6f8f).
+	if !fs.acl.RenameAllowed(fs.abs(oldname), fs.abs(newname)) {
+		return &os.LinkError{Op: "acl", Old: oldname, New: newname, Err: errACLDenied}
+	}
 	return fs.Fs.Rename(oldname, newname)
 }
 
