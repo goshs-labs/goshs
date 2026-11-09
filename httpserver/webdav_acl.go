@@ -266,6 +266,15 @@ func (a webdavACLFileSystem) Rename(ctx context.Context, oldName, newName string
 	if err := a.aclError(ctx, newName); err != nil {
 		return err
 	}
+	// aclError only sees the two addressed paths; moving a directory must not
+	// carry protected content out of its .goshs scope (GHSA-95fx-g5c4-6f8f).
+	req := reqFromContext(ctx)
+	satisfied := func(acl configFile) bool { return acl.Auth == "" || (req != nil && aclSatisfied(req, acl)) }
+	oldAbs, oldErr := sanitizePath(a.srv.Webroot, oldName)
+	newAbs, newErr := sanitizePath(a.srv.Webroot, newName)
+	if oldErr != nil || newErr != nil || !a.srv.subtreeMovable(oldAbs, newAbs, satisfied) {
+		return os.ErrPermission
+	}
 	return a.root.Rename(ctx, oldName, newName)
 }
 

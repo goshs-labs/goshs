@@ -128,11 +128,12 @@ func (fs *FileServer) findEffectiveACL(dir string) (configFile, error) {
 	return effective, nil
 }
 
-// containsACLName reports whether any component of p is named .goshs
-// (case-insensitively). Creating such a path would either plant an ACL file or
-// a directory masking one, so every create path must refuse it.
+// containsACLName reports whether any component of p names .goshs, including
+// its case and trailing-dot/space alias spellings (isACLFileName). Creating such
+// a path would either plant an ACL file or a directory masking one, so every
+// create path must refuse it. Windows opens ".goshs." / ".goshs " as the real
+// .goshs, so an exact-spelling compare let an anonymous upload create or
+// overwrite the ACL (GHSA-8v6q-gvgc-m3vq).
 func containsACLName(p string) bool {
-	return slices.ContainsFunc(strings.Split(filepath.ToSlash(p), "/"), func(s string) bool {
-		return strings.EqualFold(s, ".goshs")
-	})
+	return slices.ContainsFunc(strings.Split(filepath.ToSlash(p), "/"), isACLFileName)
 }

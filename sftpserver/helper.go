@@ -322,6 +322,13 @@ func cmdFile(root string, r *sftp.Request, ip string, sftpServer *SFTPServer) er
 			sftpServer.HandleWebhookSend("sftp", r, ip, true)
 			return errACLDenied
 		}
+		// ...and the source subtree: moving a directory out of the .goshs
+		// scope that protects its contents exposes them (GHSA-95fx-g5c4-6f8f).
+		if !sftpServer.protocolACL().RenameAllowed(fullPath, targetPath) {
+			logger.LogSFTPRequestBlocked(r, ip, errACLDenied)
+			sftpServer.HandleWebhookSend("sftp", r, ip, true)
+			return errACLDenied
+		}
 		err = os.Rename(fullPath, targetPath)
 		if err != nil {
 			logger.LogSFTPRequestBlocked(r, ip, err)

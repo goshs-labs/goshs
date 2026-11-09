@@ -304,9 +304,14 @@ matching update.
   `webdavEnforceACL`/`aclError` (`webdav_acl.go`), and `ProtocolACL.Allowed`
   (SFTP/FTP/TFTP/SMB). Listing/walk sites (`visible`, `aclFile.Readdir`, the bulk
   walker) see canonical names already, so they use the normalized `blockListed`/
-  `isACLFileName` directly. Regression tests (symlink-reproduced on Linux):
-  `httpserver/security_bypass_test.go`. When adding a new block/`.goshs` check, route it
-  through these helpers.
+  `isACLFileName` directly. The **create side** goes through the same helpers:
+  `containsACLName` (multipart upload, mkdir, `ProtocolACL.Allowed`) compares each
+  component via `isACLFileName`, and the HTTP `put()`/`deleteFile()` `.goshs` guards use
+  `isACLFilePath` — an exact-spelling compare there let an anonymous `PUT /.goshs.` (or a
+  multipart `filename=.goshs.`) create/overwrite the real ACL on Windows,
+  **GHSA-8v6q-gvgc-m3vq** (dup **GHSA-fqxq-xh82-pcgh**). Regression tests (symlink-reproduced
+  on Linux): `httpserver/security_bypass_test.go`, `httpserver/rename_acl_test.go`. When
+  adding a new block/`.goshs` check — read *or* write — route it through these helpers.
 - **The `.goshs` per-folder ACL must be enforced on *every* protocol that serves the
   webroot, not just HTTP.** HTTP uses `applyCustomAuth`/`aclSatisfied`; WebDAV uses
   `webdavEnforceACL`/`aclFile.Readdir`. Credential-less transfer protocols (SFTP)
@@ -364,6 +369,17 @@ matching update.
   `ProtocolACL.SubtreeAllowed`). SMB only uses non-recursive `os.Remove`. Tests:
   `httpserver/delete_acl_test.go`, `{ftpserver,sftpserver}/acl_test.go`. Any new
   recursive delete must go through it.
+- **Renames check the moved subtree too.** Block entries (and inherited auth) are
+  declared in an *ancestor* `.goshs`, so renaming the directory that holds a block-listed
+  file out of that scope served it at the new path — **GHSA-95fx-g5c4-6f8f**.
+  `FileServer.subtreeMovable` (`acl_protocol.go`) allows a directory rename only if
+  `subtreeRemovable` (nothing protected below) **or** the new parent's effective ACL keeps
+  the old parent's constraints (same `Auth` if set, block list ⊇), and never if the dir
+  itself is block-listed (`name`/`name/`). A `.goshs` inside the subtree travels with it.
+  Wired into WebDAV `Rename` (MOVE), FTP `aclFs.Rename`, SFTP `Rename` and SMB
+  `FileRenameInformation` (via `ProtocolACL.RenameAllowed`). Tests:
+  `httpserver/rename_acl_test.go`, `{ftpserver,sftpserver,smbserver}/acl_test.go`. Any new
+  rename/move sink must go through it.
 - **Bulk download** zip walker enforces per-file ACL and excludes `.goshs` during the
   recursive walk (regression-tested in `httpserver/bulk_acl_test.go`) — a prior bug let
   parent-dir bulk selection bypass nested `.goshs` auth/block.

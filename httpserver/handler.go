@@ -659,7 +659,7 @@ func (fileS *FileServer) constructItems(fis []fs.FileInfo, relpath string, acl c
 	items := make([]item, 0, len(fis))
 	// Iterate over FileInfo of dir
 	for _, fi := range fis {
-		if strings.EqualFold(fi.Name(), ".goshs") {
+		if isACLFileName(fi.Name()) {
 			logger.Debug(".goshs detected and therefore applying")
 			// Do not add it to items
 			continue
@@ -898,8 +898,9 @@ func (fs *FileServer) deleteFile(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Block deletion of the .goshs ACL file itself
-	if strings.EqualFold(filepath.Base(deletePath), ".goshs") {
+	// Block deletion of the .goshs ACL file itself, under any alias spelling
+	// (GHSA-8v6q-gvgc-m3vq).
+	if isACLFilePath(deletePath) {
 		fs.handleError(w, req, fmt.Errorf("cannot delete ACL file"), http.StatusForbidden)
 		return
 	}

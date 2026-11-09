@@ -164,3 +164,20 @@ func TestSFTP_ACL_RmdirAncestorOfProtectedDenied(t *testing.T) {
 	require.ErrorIs(t, err, errACLDenied)
 	require.FileExists(t, filepath.Join(dir, "a", "protected", "secret.txt"))
 }
+
+// GHSA-95fx-g5c4-6f8f: renaming a directory must not move a block-listed file
+// out of the .goshs scope that hides it.
+func TestSFTP_ACL_RenameOutOfBlockScopeDenied(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "pub", "sub"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pub", ".goshs"), []byte(`{"block":["flag.txt"]}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pub", "sub", "flag.txt"), []byte("FLAG"), 0o644))
+	h := &DefaultHandler{Root: dir, ClientIP: "1.2.3.4", SFTPServer: testSFTPServer(dir)}
+
+	err := h.Filecmd(&sftp.Request{Method: "Rename", Filepath: "/pub/sub", Target: "/moved"})
+	require.ErrorIs(t, err, errACLDenied)
+	require.FileExists(t, filepath.Join(dir, "pub", "sub", "flag.txt"))
+
+	require.NoError(t, h.Filecmd(&sftp.Request{Method: "Rename", Filepath: "/pub/sub", Target: "/pub/sub2"}))
+	require.FileExists(t, filepath.Join(dir, "pub", "sub2", "flag.txt"))
+}
