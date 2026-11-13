@@ -6,6 +6,7 @@ import (
 	"mime"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/grandcat/zeroconf"
@@ -33,10 +34,10 @@ func MimeByExtension(n string) string {
 	return mime.TypeByExtension(ReturnExt(n))
 }
 
-// ReturnExt returns the extension without from a filename
+// ReturnExt returns the extension of a filename, including the leading dot.
+// It returns an empty string when the name carries no extension.
 func ReturnExt(n string) string {
-	extSlice := strings.Split(n, ".")
-	return "." + extSlice[len(extSlice)-1]
+	return filepath.Ext(n)
 }
 
 // GetInterfaceIpv4Addr will return the ip address by name

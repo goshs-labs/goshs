@@ -552,3 +552,18 @@ func TestHandleSMTPAttachment_Range(t *testing.T) {
 	require.Equal(t, "2345", w.Body.String())
 	require.Contains(t, w.Header().Get("Content-Disposition"), "attachment")
 }
+
+// A file whose name carries no extension must not be typed from the whole
+// name, or a plain file called "png" is served as image/png.
+func TestSendFile_ExtensionlessName_IsNotTypedFromTheName(t *testing.T) {
+	body := []byte("this is plain text, not an image")
+	fs, f := writeServeFile(t, "png", body)
+
+	r := httptest.NewRequest(http.MethodGet, "/png", nil)
+	w := httptest.NewRecorder()
+	fs.sendFile(w, r, f, configFile{})
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "", w.Header().Get("Content-Type"))
+	require.Equal(t, body, w.Body.Bytes())
+}
