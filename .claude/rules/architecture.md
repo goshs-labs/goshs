@@ -383,6 +383,14 @@ matching update.
 - **Bulk download** zip walker enforces per-file ACL and excludes `.goshs` during the
   recursive walk (regression-tested in `httpserver/bulk_acl_test.go`) — a prior bug let
   parent-dir bulk selection bypass nested `.goshs` auth/block.
+- **Chat is cross-viewer stored content — every client-supplied field rendered via
+  `innerHTML` must go through `esc()` (or DOMPurify for markdown bodies).** The
+  reaction hover tooltip (`showReactionTip` in `chat.js`) concatenated the raw
+  reaction key, a stored XSS from any (incl. anonymous) chat participant to every
+  other viewer — **GHSA-hwm6-6mhm-83f5**. Fixed by `esc(emoji)` plus server-side
+  `validReactionEmoji` (`ws/client.go`): ≤32 bytes, valid UTF-8, no control code
+  points, and the only ASCII allowed is the keycap bases `0-9#*`. Tests:
+  `ws/ws_test.go` (`TestDispatchReadPump_ReactRejectsMarkup`, `TestValidReactionEmoji`).
 - The rogue protocol servers (SMB/LDAP/SMTP/DNS) capture credentials/NTLM by design;
   changes there have real security impact.
 - **`--no-delete` / `--upload-only` mean "no destruction of existing content" across
