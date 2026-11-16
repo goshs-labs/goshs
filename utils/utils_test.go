@@ -67,6 +67,24 @@ func TestReturnExt(t *testing.T) {
 	if ext != correctExt {
 		t.Errorf("Error in ReturnExt: want %s - got %s", correctExt, ext)
 	}
+
+	tests := []struct {
+		name     string
+		expected string
+	}{
+		{"test.csv.txt", ".txt"},
+		{"archive.tar.gz", ".gz"},
+		{"README", ""},
+		{"png", ""},
+		{"", ""},
+		{".bashrc", ".bashrc"},
+		{"trailing.", "."},
+		{"dir.v2/README", ""},
+	}
+
+	for _, test := range tests {
+		require.Equal(t, test.expected, ReturnExt(test.name), "failed on %q", test.name)
+	}
 }
 
 func TestGetIPv4Addr(t *testing.T) {
