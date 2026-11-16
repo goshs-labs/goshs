@@ -494,7 +494,7 @@ function showReactionTip(chip, emoji, authors) {
   const tip = reactionTip();
   const names = (authors || []).map((a) => esc(a)).join(", ");
   tip.innerHTML =
-    '<span class="chat-reaction-tip-emoji">' + emoji + "</span>" +
+    '<span class="chat-reaction-tip-emoji">' + esc(emoji) + "</span>" +
     '<span class="chat-reaction-tip-who">' + names + "</span>";
   tip.hidden = false;
   // Center the tooltip above the chip, clamped to the viewport.

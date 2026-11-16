@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 	"goshs.de/goshs/v2/chat"
@@ -16,6 +18,33 @@ import (
 // still bounding memory per frame. Pasted images larger than this should be sent
 // to disk via the chat upload endpoint instead of inlined.
 const wsReadLimit = 16 << 20 // 16 MiB
+
+// maxReactionEmojiLen bounds a reaction key in bytes. The longest ZWJ
+// sequences in the catalog (e.g. family emoji) stay well below this.
+const maxReactionEmojiLen = 32
+
+// validReactionEmoji reports whether s is acceptable as a chat reaction key.
+// Reactions are picked from the emoji catalog, so a legitimate key is a short,
+// valid UTF-8 emoji sequence: the only ASCII it can contain are the keycap
+// bases 0-9, '#' and '*'. Everything else ASCII (letters, '<', '>', '&', quotes,
+// whitespace) and any control (C0/C1) code point is refused.
+// This is defense in depth: the web UI also escapes the key before rendering.
+func validReactionEmoji(s string) bool {
+	if s == "" || len(s) > maxReactionEmojiLen || !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r < 0x80:
+			if !(r >= '0' && r <= '9') && r != '#' && r != '*' {
+				return false
+			}
+		case unicode.IsControl(r):
+			return false
+		}
+	}
+	return true
+}
 
 // Packet defines a packet struct
 type Packet struct {
@@ -120,9 +149,10 @@ func (c *Client) dispatchReadPump(packet Packet) {
 			logger.Errorf("Error reading json packet: %+v", err)
 			return
 		}
-		// Guard against oversized/empty "emoji" payloads from a hostile client;
-		// the value is stored and relayed to every other client.
-		if in.Emoji == "" || len(in.Emoji) > 32 {
+		// Guard against oversized/empty/non-emoji payloads from a hostile client;
+		// the value is stored and relayed to every other client, so it must never
+		// carry markup or control bytes (GHSA-hwm6-6mhm-83f5).
+		if !validReactionEmoji(in.Emoji) {
 			logger.Warnf("Ignoring reaction with invalid emoji (len %d)", len(in.Emoji))
 			return
 		}

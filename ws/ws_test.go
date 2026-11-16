@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -150,6 +151,47 @@ func TestDispatchReadPump_ReactInvalidEmoji(t *testing.T) {
 	case <-hub.Broadcast:
 		t.Fatal("oversized reaction must not broadcast")
 	default:
+	}
+}
+
+// GHSA-hwm6-6mhm-83f5: a reaction key carrying markup was stored and relayed to
+// every client, where the hover tooltip rendered it as HTML. Such keys must be
+// rejected server-side before they are stored or broadcast.
+func TestDispatchReadPump_ReactRejectsMarkup(t *testing.T) {
+	for _, emoji := range []string{
+		`<img src onerror=alert(1)>`,
+		`<svg onload=alert(1)>`,
+		`&lt;b&gt;`,
+		`"x"`,
+		"\u001b[31m",
+		"🔥<b>",
+		"a",
+		"🔥 ",
+	} {
+		ch := &chat.Chat{}
+		ch.AddEntry("alice", "gg") // gets ID 0
+		hub := &Hub{chat: ch, Broadcast: make(chan []byte, 1)}
+		client := &Client{hub: hub}
+
+		content, err := json.Marshal(map[string]any{"id": 0, "emoji": emoji, "author": "bob"})
+		require.NoError(t, err)
+		client.dispatchReadPump(Packet{Type: "react", Content: content})
+
+		select {
+		case <-hub.Broadcast:
+			t.Fatalf("reaction %q must not broadcast", emoji)
+		default:
+		}
+		require.Empty(t, ch.Messages[0].Reactions, "reaction %q must not be stored", emoji)
+	}
+}
+
+func TestValidReactionEmoji(t *testing.T) {
+	for _, ok := range []string{"🔥", "👍", "❤️", "1️⃣", "#️⃣", "*️⃣", "👨‍👩‍👧‍👦", "🏳️‍🌈", "©️"} {
+		require.True(t, validReactionEmoji(ok), "%q should be valid", ok)
+	}
+	for _, bad := range []string{"", "<", ">", "&", "'", "\"", " ", "abc", "🔥\x00", "🔥\u0085", "\xff", strings.Repeat("🔥", 9)} {
+		require.False(t, validReactionEmoji(bad), "%q should be invalid", bad)
 	}
 }
 
