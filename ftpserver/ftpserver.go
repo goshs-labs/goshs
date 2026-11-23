@@ -133,21 +133,29 @@ func (d *mainDriver) AuthUser(cc ftplib.ClientContext, user, pass string) (ftpli
 	logger.Infof("[FTP] User '%s' authenticated from %s", user, cc.RemoteAddr())
 	d.srv.HandleWebhookSend("AUTH", user, cc.RemoteAddr().String(), false)
 
-	base := afero.NewBasePathFs(afero.NewOsFs(), d.srv.Root)
-	if d.srv.ReadOnly {
-		return d.srv.withACL(afero.NewReadOnlyFs(base)), nil
+	return d.srv.clientFs(), nil
+}
+
+// clientFs builds the filesystem a logged-in client sees: the webroot with the
+// mode-flag wrappers and, outermost, the .goshs ACL.
+func (s *FTPServer) clientFs() afero.Fs {
+	base := afero.NewBasePathFs(afero.NewOsFs(), s.Root)
+	if s.ReadOnly {
+		return s.withACL(afero.NewReadOnlyFs(base))
 	}
 	// upload-only and no-delete are independent and may be combined, so stack the
-	// wrappers rather than picking one branch. no-delete goes on first so an
-	// upload-only STOR that truncates an existing file is still caught by it.
+	// wrappers rather than picking one branch. Upload-only is a drop box: like
+	// every other protocol it must not let a client destroy what is already
+	// there, so it gets the no-delete guard too (GHSA-c3p2-6762-cf9j). no-delete
+	// goes on first so an upload-only STOR over an existing file is caught by it.
 	var fs afero.Fs = base
-	if d.srv.NoDelete {
+	if s.NoDelete || s.UploadOnly {
 		fs = &noDeleteFs{Fs: fs}
 	}
-	if d.srv.UploadOnly {
+	if s.UploadOnly {
 		fs = &uploadOnlyFs{Fs: fs}
 	}
-	return d.srv.withACL(fs), nil
+	return s.withACL(fs)
 }
 
 // withACL wraps fs so every operation honours the per-folder .goshs ACL. It is
@@ -187,9 +195,10 @@ func (d *mainDriver) GetTLSConfig() (*tls.Config, error) {
 }
 
 // noDeleteFs wraps afero.Fs and blocks any operation that would destroy an
-// existing file's contents. Removing is not the only way to lose a file: a
-// rename moves it away from its path, and opening it O_TRUNC (or Create) rewrites
-// it from empty, so those are blocked too. This mirrors the WebDAV guard in
+// existing file's contents. It backs both --no-delete and --upload-only.
+// Removing is not the only way to lose a file: a rename moves it away from its
+// path, opening it O_TRUNC (or Create) rewrites it from empty, and a non-append
+// write open (REST + STOR) overwrites it in place, so those are blocked too. This mirrors the WebDAV guard in
 // httpserver/webdav_acl.go, which already treats MOVE and overwriting PUT/COPY
 // as deletions. Creating new files and appending (which preserve existing
 // content) stay allowed.
@@ -210,22 +219,28 @@ func (fs *noDeleteFs) Rename(oldname, newname string) error {
 }
 
 func (fs *noDeleteFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	// A truncating write over an existing file destroys its contents. Appends
-	// (O_APPEND without O_TRUNC) and writes to new files are fine.
-	if flag&(os.O_WRONLY|os.O_RDWR) != 0 && flag&os.O_TRUNC != 0 {
-		if exists, _ := afero.Exists(fs.Fs, name); exists {
-			return nil, fmt.Errorf("overwrite not allowed in no-delete mode")
-		}
+	if flag&(os.O_WRONLY|os.O_RDWR) == 0 {
+		return fs.Fs.OpenFile(name, flag, perm)
+	}
+	// Any write open of an existing file other than a pure append destroys
+	// content: O_TRUNC wipes it, and a positioned write (ftpserverlib opens
+	// O_WRONLY|O_CREATE without O_TRUNC after REST <n>, then seeks) overwrites
+	// it in place — GHSA-qwpj-g46h-59wx. Only O_APPEND without O_TRUNC is safe.
+	exists, _ := afero.Exists(fs.Fs, name)
+	if exists && (flag&os.O_APPEND == 0 || flag&os.O_TRUNC != 0) {
+		return nil, fmt.Errorf("overwrite not allowed in no-delete mode")
+	}
+	// For a new file, O_EXCL makes sure a file that appears between the check
+	// above and the open is never truncated or written over.
+	if !exists && flag&os.O_CREATE != 0 {
+		flag |= os.O_EXCL
 	}
 	return fs.Fs.OpenFile(name, flag, perm)
 }
 
 func (fs *noDeleteFs) Create(name string) (afero.File, error) {
 	// Create implies O_TRUNC, so it would wipe an existing file.
-	if exists, _ := afero.Exists(fs.Fs, name); exists {
-		return nil, fmt.Errorf("overwrite not allowed in no-delete mode")
-	}
-	return fs.Fs.Create(name)
+	return fs.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o666)
 }
 
 // uploadOnlyFs wraps afero.Fs so clients can write (STOR) and list directories

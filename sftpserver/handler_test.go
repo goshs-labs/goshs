@@ -566,7 +566,7 @@ func TestWriteFile_DotDotPathRerootedNoParentDir(t *testing.T) {
 	srv := testSFTPServer(dir)
 	// sanitizePath re-roots inside dir; os.Create fails — parent "tmp" subdir doesn't exist
 	r := &sftp.Request{Method: "Put", Filepath: "/../../../tmp/evil.txt"}
-	_, err := writeFile(dir, r, "1.2.3.4", srv)
+	_, err := writeFile(dir, r, "1.2.3.4", srv, false)
 	require.Error(t, err)
 }
 
@@ -574,7 +574,7 @@ func TestWriteFile_Success(t *testing.T) {
 	dir := t.TempDir()
 	srv := testSFTPServer(dir)
 	r := &sftp.Request{Method: "Put", Filepath: "/newfile.txt"}
-	f, err := writeFile(dir, r, "1.2.3.4", srv)
+	f, err := writeFile(dir, r, "1.2.3.4", srv, false)
 	require.NoError(t, err)
 	require.NotNil(t, f)
 	f.Close()
@@ -641,4 +641,25 @@ func TestCmdFile_RenameTargetTraversalBlocked(t *testing.T) {
 	r := &sftp.Request{Method: "Rename", Filepath: "/src.txt", Target: "/../../../tmp/dst.txt"}
 	err := cmdFile(dir, r, "1.2.3.4", srv)
 	require.Error(t, err)
+}
+
+// GHSA-c3p2-6762-cf9j: an upload-only drop box must not let a client truncate
+// and replace a file that is already there, while new uploads keep working.
+func TestUploadOnlyHandler_BlocksOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "a.txt")
+	require.NoError(t, os.WriteFile(target, []byte("hello world"), 0644))
+	srv := testSFTPServer(dir)
+	srv.UploadOnly = true
+	h := &UploadOnlyHandler{Root: dir, ClientIP: "1.2.3.4", SFTPServer: srv}
+
+	_, err := h.Filewrite(&sftp.Request{Method: "Put", Filepath: "/a.txt"})
+	require.Error(t, err)
+	data, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	require.Equal(t, "hello world", string(data))
+
+	w, err := h.Filewrite(&sftp.Request{Method: "Put", Filepath: "/new.txt"})
+	require.NoError(t, err)
+	require.NoError(t, w.(io.Closer).Close())
 }

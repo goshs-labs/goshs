@@ -208,8 +208,9 @@ func listFile(root string, r *sftp.Request, ip string, sftpServer *SFTPServer) (
 	}
 }
 
-// writeFile opens a file for writing
-func writeFile(root string, r *sftp.Request, ip string, sftpServer *SFTPServer) (*os.File, error) {
+// writeFile opens a file for writing. With noClobber an existing path is
+// refused and a new file is created O_EXCL.
+func writeFile(root string, r *sftp.Request, ip string, sftpServer *SFTPServer, noClobber bool) (*os.File, error) {
 	if runtime.GOOS == "windows" {
 		r.Filepath = rewritePathWindows(r.Filepath)
 	}
@@ -224,17 +225,22 @@ func writeFile(root string, r *sftp.Request, ip string, sftpServer *SFTPServer) 
 		sftpServer.HandleWebhookSend("sftp", r, ip, true)
 		return nil, errACLDenied
 	}
-	// Enforce --no-delete: overwriting an existing file with os.Create truncates
-	// it, which destroys its previous contents — a deletion. Block it while still
-	// allowing creation of new files (GHSA-4wh5-87mw-whxf). Mirrors the HTTP
-	// upload handler's no-delete overwrite guard in updown.go.
-	if sftpServer.NoDelete {
-		if info, statErr := os.Stat(fullPath); statErr == nil && !info.IsDir() {
-			nErr := errors.New("overwriting existing files not allowed due to 'no delete' option")
+	// Enforce --no-delete and --upload-only: overwriting an existing file with
+	// os.Create truncates it, which destroys its previous contents — a deletion.
+	// Block it while still allowing creation of new files (GHSA-4wh5-87mw-whxf;
+	// upload-only drop boxes were missed, GHSA-c3p2-6762-cf9j). O_EXCL closes the
+	// window between the Stat and the open. Mirrors the HTTP upload handler's
+	// overwrite guard in updown.go.
+	if noClobber {
+		if _, statErr := os.Lstat(fullPath); statErr == nil {
+			nErr := errors.New("overwriting existing files not allowed due to 'no delete' / 'upload only' option")
 			logger.LogSFTPRequestBlocked(r, ip, nErr)
 			sftpServer.HandleWebhookSend("sftp", r, ip, true)
 			return nil, nErr
 		}
+		logger.LogSFTPRequest(r, ip)
+		sftpServer.HandleWebhookSend("sftp", r, ip, false)
+		return os.OpenFile(fullPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
 	}
 	logger.LogSFTPRequest(r, ip)
 	sftpServer.HandleWebhookSend("sftp", r, ip, false)
