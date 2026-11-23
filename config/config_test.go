@@ -275,3 +275,31 @@ func TestLoadConfig_LetsEncryptFields(t *testing.T) {
 	require.Equal(t, "80", result.LEHTTPPort)
 	require.Equal(t, "443", result.LETLSPort)
 }
+
+// http_server (issue #351): absent keeps HTTP on (configs written before the
+// key existed must not lose their web server), true keeps it on, false turns
+// it off.
+func TestLoadConfig_HTTPServer(t *testing.T) {
+	for name, tc := range map[string]struct {
+		json   string
+		noHTTP bool
+	}{
+		"absent": {`{"directory":"/tmp"}`, false},
+		"true":   {`{"directory":"/tmp","http_server":true}`, false},
+		"false":  {`{"directory":"/tmp","http_server":false}`, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "goshs.json")
+			require.NoError(t, os.WriteFile(path, []byte(tc.json), 0o600))
+			result, err := LoadConfig(&options.Options{ConfigFile: path})
+			require.NoError(t, err)
+			require.Equal(t, tc.noHTTP, result.NoHTTP)
+		})
+	}
+}
+
+func TestPrintExample_HTTPServerEnabled(t *testing.T) {
+	out, err := PrintExample()
+	require.NoError(t, err)
+	require.Contains(t, out, `"http_server": true`)
+}

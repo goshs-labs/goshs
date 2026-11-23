@@ -57,11 +57,19 @@ func StartAll(opts *options.Options) (*Servers, error) {
 	// http — bind synchronously so a port conflict is reported to the caller
 	// (and, under --tui, before the dashboard takes over the terminal) instead
 	// of the serving goroutine calling Fatalf behind its back.
+	//
+	// The FileServer is always constructed — it owns the reverse-shell catcher
+	// manager the TUI drives and the privilege-drop logic — but with --no-http
+	// it is never bound or served.
 	httpSrv := httpserver.NewHttpServer(opts, hub, ch, wl, *wh)
-	if err := httpSrv.Bind("web"); err != nil {
-		return nil, err
+	if !opts.NoHTTP {
+		if err := httpSrv.Bind("web"); err != nil {
+			return nil, err
+		}
+		go httpSrv.Start("web")
+	} else {
+		logger.Info("HTTP server disabled (--no-http)")
 	}
-	go httpSrv.Start("web")
 
 	// webdav
 	var webdavSrv *httpserver.FileServer
@@ -137,10 +145,17 @@ func StartAll(opts *options.Options) (*Servers, error) {
 
 	// Zeroconf mDNS
 	if opts.MDNS {
-		err := utils.RegisterZeroconfMDNS(opts.SSL, opts.Port, opts.WebDav, opts.WebDavPort, opts.SMTP, opts.SMTPPort, opts.DNS, opts.DNSPort, opts.SMB, opts.SMBPort, opts.LDAP, opts.LDAPPort, opts.FTP, opts.FTPSFTPMode, opts.FTPPort, opts.TFTP, opts.TFTPPort)
+		err := utils.RegisterZeroconfMDNS(!opts.NoHTTP, opts.SSL, opts.Port, opts.WebDav, opts.WebDavPort, opts.SMTP, opts.SMTPPort, opts.DNS, opts.DNSPort, opts.SMB, opts.SMBPort, opts.LDAP, opts.LDAPPort, opts.FTP, opts.FTPSFTPMode, opts.FTPPort, opts.TFTP, opts.TFTPPort)
 		if err != nil {
 			logger.Warnf("error registering zeroconf mDNS: %+v", err)
 		}
+	}
+
+	// The HTTP serving goroutine normally drops privileges once it is up. With
+	// --no-http nobody else does, so drop them here — after every listener
+	// above is bound, so privileged ports (e.g. SMB 445, LDAP 389) still work.
+	if opts.NoHTTP {
+		httpSrv.DropPrivs()
 	}
 
 	shutdown := func(ctx context.Context) {

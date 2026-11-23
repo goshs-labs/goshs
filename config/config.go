@@ -28,6 +28,7 @@ type Config struct {
 	Interface           string   `json:"interface"`
 	Port                int      `json:"port"`
 	Directory           string   `json:"directory"`
+	HTTPServer          *bool    `json:"http_server"` // nil (key absent) = enabled
 	UploadFolder        string   `json:"upload_folder"`
 	SSL                 bool     `json:"ssl"`
 	SelfSigned          bool     `json:"self_signed"`
@@ -120,6 +121,9 @@ func LoadConfig(opts *options.Options) (*options.Options, error) {
 	opts.IP = cfg.Interface
 	opts.Port = cfg.Port
 	opts.Webroot = cfg.Directory
+	// http_server is a *bool so a config that predates the key keeps the web
+	// server enabled instead of silently turning it off.
+	opts.NoHTTP = cfg.HTTPServer != nil && !*cfg.HTTPServer
 	opts.UploadFolder = cfg.UploadFolder
 	opts.SSL = cfg.SSL
 	opts.SelfSigned = cfg.SelfSigned
@@ -195,10 +199,12 @@ func LoadConfig(opts *options.Options) (*options.Options, error) {
 }
 
 func PrintExample() (string, error) {
+	httpServerDefault := true
 	defaultConfig := Config{
 		Interface:           "0.0.0.0",
 		Port:                8000,
 		Directory:           ".",
+		HTTPServer:          &httpServerDefault,
 		UploadFolder:        ".",
 		SSL:                 false,
 		SelfSigned:          false,

@@ -62,6 +62,22 @@ func Check(opts *options.Options) (*options.Options, error) {
 		logger.Warn("Invisible mode activated, disabling FTP/SFTP, TFTP, WebDAV, silent mode, DNS, SMTP, LDAP and mDNS support")
 	}
 
+	// Sanity checks for running without the HTTP server (--no-http)
+	if opts.NoHTTP {
+		if opts.Tunnel {
+			return opts, fmt.Errorf("--tunnel exposes the HTTP server and cannot be combined with --no-http")
+		}
+		if !opts.WebDav && !opts.FTP && !opts.TFTP && !opts.SMB && !opts.LDAP && !opts.DNS && !opts.SMTP && !opts.TUI {
+			return opts, fmt.Errorf("--no-http leaves nothing to serve: enable at least one other server (e.g. -w, -ftp, -tftp, -smb, -ldap, -dns, -smtp) or --tui")
+		}
+		if opts.CLI || opts.Silent {
+			logger.Warn("--no-http is set: the web-only options -c/--cli and -si/--silent have no effect")
+		}
+		if opts.LDAP && opts.LDAPJNDIEnabled && opts.LDAPJNDIBase == "" {
+			logger.Warn("--ldap-jndi derives its codeBase from the HTTP server, which --no-http disables; set --ldap-jndi-base to an external URL")
+		}
+	}
+
 	// Sanity check for upload only vs read only
 	if opts.UploadOnly && opts.ReadOnly {
 		logger.Fatal("You can only select either 'upload only' or 'read only', not both.")

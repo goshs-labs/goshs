@@ -15,6 +15,7 @@ _goshs() {
         '(-uo --upload-only)'{-uo,--upload-only}'[Upload only mode]' \
         '(-uf --upload-folder)'{-uf,--upload-folder}'[Upload folder]:directory:_files -/' \
         '(-mu --max-upload)'{-mu,--max-upload}'[Max upload size in bytes (0=unlimited)]:bytes' \
+        '(-nh --no-http)'{-nh,--no-http}'[Do not start the HTTP(S) web server]' \
         '(-nc --no-chat)'{-nc,--no-chat}'[Disable team chat]' \
         '(-pc --persist-chat)'{-pc,--persist-chat}'[Persist chat to disk (.goshs-chat/)]' \
         '(-pci --persist-chat-images)'{-pci,--persist-chat-images}'[Write pasted chat images to disk]' \

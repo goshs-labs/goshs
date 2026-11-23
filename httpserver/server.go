@@ -42,6 +42,12 @@ func (fs *FileServer) Shutdown(ctx context.Context) error {
 	return fs.httpServer.Shutdown(ctx)
 }
 
+// DropPrivs drops privileges to --user (unix only). The HTTP listener does this
+// itself once serving; callers that never start it (--no-http) use this.
+func (fs *FileServer) DropPrivs() {
+	fs.dropPrivs()
+}
+
 // logServeResult treats http.ErrServerClosed as a clean exit (graceful
 // shutdown) and panics on any other error.
 func logServeResult(err error) {

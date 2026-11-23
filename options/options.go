@@ -20,6 +20,7 @@ type Options struct {
 	IP                  string            // "0.0.0.0"
 	Port                int               // 8000
 	Webroot             string            // "."
+	NoHTTP              bool              // false — do not start the HTTP(S) web server
 	SSL                 bool              // false
 	SelfSigned          bool              // false
 	MyKey               string            // ""
@@ -131,6 +132,8 @@ func Parse() (*Options, bool) {
 	flag.StringVar(&opts.BasicAuth, "basic-auth", "", "basic auth")
 	flag.StringVar(&opts.CertAuth, "ca", "", "cert auth")
 	flag.StringVar(&opts.CertAuth, "cert-auth", "", "cert auth")
+	flag.BoolVar(&opts.NoHTTP, "nh", false, "disable http server")
+	flag.BoolVar(&opts.NoHTTP, "no-http", false, "disable http server")
 	flag.BoolVar(&opts.WebDav, "w", false, "enable webdav")
 	flag.BoolVar(&opts.WebDav, "webdav", false, "enable webdav")
 	flag.IntVar(&opts.WebDavPort, "wp", 8001, "webdav port")
@@ -277,6 +280,7 @@ Web server options:
   -i,  --ip             IP or Interface to listen on              (default: 0.0.0.0)
   -p,  --port           The port to listen on                     (default: 8000)
   -d,  --dir            The web root directory                    (default: current working path)
+  -nh, --no-http        Do not start the HTTP(S) web server       (default: false)
   -w,  --webdav         Also serve using webdav protocol          (default: false)
   -wp, --webdav-port    The port to listen on for webdav          (default: 8001)
   -ro, --read-only      Read only mode, no upload possible        (default: false)
@@ -391,6 +395,7 @@ Usage examples:
   Start with basic auth bcrypt hash:   	./goshs -b 'secret-user:$2a$14$ydRJ//Ob4SctB/D7o.rvU.LmPs/vwXkeXCbtpCqzgOJDSShLgiY52'
   Start with basic auth empty user:	./goshs -b ':$up3r$3cur3'
   Start with cli enabled:           	./goshs -b 'secret-user:$up3r$3cur3' -s -ss -c
+  Start without the web server:     	./goshs -nh -ftp -ldap
   Start with payload templating:    	./goshs -i 10.10.14.7 --template --tpl-var LPORT=4444
 
 `, goshsversion.GoshsVersion, os.Args[0])

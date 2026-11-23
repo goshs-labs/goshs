@@ -47,6 +47,7 @@ was not called first, so direct callers keep working. Coverage: `httpserver`
 | Capability | Package | Notes |
 |---|---|---|
 | HTTP(S) file server, upload, listing, preview | `httpserver/` | Core. Templates + static assets embedded (see Assets). Auth, ACL (`.goshs` dirs), bulk zip download. |
+| HTTP on/off | `options.NoHTTP` (`-nh`/`--no-http`, config `http_server` — a `*bool`, absent = on) | Skips `Bind`/`Start` of the web listener in `StartAll`; the `FileServer` is still constructed (it owns the catcher manager the TUI uses) and `DropPrivs()` is called after all binds since the web goroutine normally drops privs. `sanity.Check` refuses it with `--tunnel` or when no other server / `--tui` is enabled. mDNS skips the web record; TUI status shows `🚫 http off`. (#351) |
 | WebDAV | `httpserver/` (WebDav flag), separate port | `WebDavPort` default 8001 |
 | FTP / SFTP | `ftpserver/`, `sftpserver/` | `FTP`, `FTPSFTPMode`, port 2121 |
 | TFTP (UDP transfer) | `tftpserver/` | `TFTP`, port 69. Hand-rolled, dependency-free (RFC 1350 + blksize/tsize OACK). RRQ download / WRQ upload, octet only, path-traversal-safe, honours whitelist + ReadOnly/UploadOnly/NoDelete (a WRQ that would truncate an existing file is refused under `--no-delete`/`--upload-only`). Registered in mDNS (`_tftp._udp`). |
