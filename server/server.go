@@ -144,8 +144,12 @@ func StartAll(opts *options.Options) (*Servers, error) {
 	}
 
 	// Zeroconf mDNS
+	mdnsShutdown := func() {}
 	if opts.MDNS {
-		err := utils.RegisterZeroconfMDNS(!opts.NoHTTP, opts.SSL, opts.Port, opts.WebDav, opts.WebDavPort, opts.SMTP, opts.SMTPPort, opts.DNS, opts.DNSPort, opts.SMB, opts.SMBPort, opts.LDAP, opts.LDAPPort, opts.FTP, opts.FTPSFTPMode, opts.FTPPort, opts.TFTP, opts.TFTPPort)
+		// Keep the registrations alive for the process lifetime; they are
+		// withdrawn in shutdown below.
+		var err error
+		mdnsShutdown, err = utils.RegisterZeroconfMDNS(!opts.NoHTTP, opts.SSL, opts.Port, opts.WebDav, opts.WebDavPort, opts.SMTP, opts.SMTPPort, opts.DNS, opts.DNSPort, opts.SMB, opts.SMBPort, opts.LDAP, opts.LDAPPort, opts.FTP, opts.FTPSFTPMode, opts.FTPPort, opts.TFTP, opts.TFTPPort)
 		if err != nil {
 			logger.Warnf("error registering zeroconf mDNS: %+v", err)
 		}
@@ -159,6 +163,7 @@ func StartAll(opts *options.Options) (*Servers, error) {
 	}
 
 	shutdown := func(ctx context.Context) {
+		mdnsShutdown()
 		if err := httpSrv.Shutdown(ctx); err != nil {
 			logger.Errorf("error shutting down HTTP server: %+v", err)
 		}
