@@ -559,3 +559,16 @@ func TestPasswordPopupHashedFlag(t *testing.T) {
 		t.Fatalf("hashed password popup should note the bcrypt hash, got:\n%s", pop)
 	}
 }
+
+// With --no-http the status line must not advertise a web URL that nothing
+// listens on.
+func TestStatusSegmentsNoHTTP(t *testing.T) {
+	m := &model{opts: &options.Options{Webroot: "/srv", IP: "10.0.0.1", Port: 8000, NoHTTP: true, FTP: true, FTPPort: 2121}}
+	seg := strings.Join(m.statusSegments(), " ")
+	if strings.Contains(seg, "http://") || strings.Contains(seg, ":8000") {
+		t.Fatalf("status line %q still advertises the disabled HTTP server", seg)
+	}
+	if !strings.Contains(seg, "http off") {
+		t.Fatalf("status line %q missing the http off marker", seg)
+	}
+}

@@ -1684,7 +1684,9 @@ func (m *model) statusSegments() []string {
 
 	add("🏷 " + goshsversion.GoshsVersion)
 	// If o.IP is '0.0.0.0', resolve to all ip addresses and show all, sort by interface name
-	if o.IP == "0.0.0.0" {
+	if o.NoHTTP {
+		add("🚫 http off")
+	} else if o.IP == "0.0.0.0" {
 		interfaceAdresses, err := utils.GetAllIPAddresses()
 		if err != nil {
 			logger.Errorf("There has been an error fetching the interface addresses: %+v\n", err)

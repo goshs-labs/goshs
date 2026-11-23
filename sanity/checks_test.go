@@ -214,3 +214,30 @@ func TestCheck_InvisibleWithSMBOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.Invisible)
 }
+
+func TestCheck_NoHTTPRequiresAnotherServer(t *testing.T) {
+	_, err := Check(&options.Options{NoHTTP: true})
+	require.Error(t, err)
+
+	for _, o := range []*options.Options{
+		{NoHTTP: true, FTP: true},
+		{NoHTTP: true, LDAP: true},
+		{NoHTTP: true, WebDav: true},
+		{NoHTTP: true, TUI: true},
+	} {
+		_, err := Check(o)
+		require.NoError(t, err)
+	}
+}
+
+func TestCheck_NoHTTPRejectsTunnel(t *testing.T) {
+	_, err := Check(&options.Options{NoHTTP: true, FTP: true, Tunnel: true})
+	require.Error(t, err)
+}
+
+// Invisible mode switches off every other listener, so --no-http on top of it
+// must not silently start a process that serves nothing.
+func TestCheck_NoHTTPWithInvisibleFails(t *testing.T) {
+	_, err := Check(&options.Options{NoHTTP: true, Invisible: true, FTP: true})
+	require.Error(t, err)
+}

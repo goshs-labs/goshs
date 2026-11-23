@@ -16,6 +16,7 @@ complete -c goshs -l read-only          -d 'Read only mode'
 complete -c goshs -l upload-only        -d 'Upload only mode'
 complete -c goshs -l upload-folder      -d 'Specify a different upload folder' -r -F
 complete -c goshs -l max-upload         -d 'Maximum upload size in bytes (0=unlimited)'
+complete -c goshs -l no-http            -d 'Do not start the HTTP(S) web server'
 complete -c goshs -l no-chat            -d 'Disable team chat'
 complete -c goshs -l persist-chat       -d 'Persist chat to disk (.goshs-chat/)'
 complete -c goshs -l persist-chat-images -d 'Write pasted chat images to disk'

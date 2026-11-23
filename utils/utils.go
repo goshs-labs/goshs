@@ -99,7 +99,7 @@ func GenerateHashedPassword(password []byte) string {
 	return string(bytes)
 }
 
-func RegisterZeroconfMDNS(ssl bool, webPort int, webdav bool, webdavPort int, smtp bool, smtpPort int, dns bool, dnsPort int, smb bool, smbPort int, ldap bool, ldapPort int, ftp bool, ftpSFTPMode bool, ftpPort int, tftp bool, tftpPort int) error {
+func RegisterZeroconfMDNS(web bool, ssl bool, webPort int, webdav bool, webdavPort int, smtp bool, smtpPort int, dns bool, dnsPort int, smb bool, smbPort int, ldap bool, ldapPort int, ftp bool, ftpSFTPMode bool, ftpPort int, tftp bool, tftpPort int) error {
 	// Register zeroconf mDNS
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -107,31 +107,34 @@ func RegisterZeroconfMDNS(ssl bool, webPort int, webdav bool, webdavPort int, sm
 	}
 	// Remove duplicate .local if applicable
 	hostname = strings.TrimSuffix(hostname, ".local")
-	// Register webPort
 	var serviceType string
 	var out string
-	switch ssl {
-	case true:
-		serviceType = "_https._tcp"
-		out = "https"
-	default:
-		serviceType = "_http._tcp"
-		out = "http"
-	}
-	zero, err := zeroconf.Register(
-		"goshs WebInterface",
-		serviceType,
-		"local.",
-		webPort,
-		[]string{fmt.Sprintf("host=%s.local", hostname), "path=/", fmt.Sprintf("version=%s", goshsversion.GoshsVersion)},
-		nil,
-	)
-	if err != nil {
-		return fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
-	}
-	defer zero.Shutdown()
 
-	logger.Infof("mDNS service registered as %s://%s.local:%d", out, hostname, webPort)
+	// Register webPort (unless the HTTP server is disabled via --no-http)
+	if web {
+		switch ssl {
+		case true:
+			serviceType = "_https._tcp"
+			out = "https"
+		default:
+			serviceType = "_http._tcp"
+			out = "http"
+		}
+		zero, err := zeroconf.Register(
+			"goshs WebInterface",
+			serviceType,
+			"local.",
+			webPort,
+			[]string{fmt.Sprintf("host=%s.local", hostname), "path=/", fmt.Sprintf("version=%s", goshsversion.GoshsVersion)},
+			nil,
+		)
+		if err != nil {
+			return fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
+		}
+		defer zero.Shutdown()
+
+		logger.Infof("mDNS service registered as %s://%s.local:%d", out, hostname, webPort)
+	}
 
 	// Register webdav if enabled
 	if webdav {
