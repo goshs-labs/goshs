@@ -76,8 +76,8 @@ github.com/emersion/go-smtp v0.26.0 h1:+f4S1F/F9uQkkODeJQFaWvF8fDeVKE+SsJtAj0XxK
 github.com/emersion/go-smtp v0.26.0/go.mod h1:ZtRRkbTyp2XTHCA+BmyTFTrj8xY4I+b4McvHxCU2gsQ=
 github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f h1:Y/CXytFA4m6baUTXGLOoWe4PQhGxaX0KpnayAqC48p4=
 github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f/go.mod h1:vw97MGsxSvLiUE2X8qFplwetxpGLQrlU1Q9AUEIzCaM=
-github.com/fclairamb/ftpserverlib v0.33.0 h1:ZlyazIdDhKDsPzOuWId7uXh5w7HpuXrfFK/UhD9ZcUU=
-github.com/fclairamb/ftpserverlib v0.33.0/go.mod h1:KuQisjRN43wF2efPcxz07RseZyOz93hp+aPG2tx8ICQ=
+github.com/fclairamb/ftpserverlib v0.33.3 h1:8+2SFtGUiIfXIQE6X7VPNJobq3qdabUCfC3Y2VnUmqc=
+github.com/fclairamb/ftpserverlib v0.33.3/go.mod h1:kvHAaE6wFlfEzI4RwCViiNJrZb2Dne8wpOMng4ySvV8=
 github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=
 github.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=
 github.com/geoffgarside/ber v1.1.0 h1:qTmFG4jJbwiSzSXoNJeHcOprVzZ8Ulde2Rrrifu5U9w=
