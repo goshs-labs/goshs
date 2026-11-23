@@ -177,6 +177,7 @@ These are the awesome contributors that made `goshs` even more secure :heart:
   <td align="center"><a href="https://github.com/ozp3"><img src="https://github.com/ozp3.png?size=50" width="50" height="50"></a></td>
   <td align="center"><a href="https://github.com/saideep632"><img src="https://github.com/saideep632.png?size=50" width="50" height="50"></a></td>
   <td align="center"><a href="https://github.com/p-w"><img src="https://github.com/p-w.png?size=50" width="50" height="50"></a></td>
+  <td align="center"><a href="https://github.com/joostgrunwald"><img src="https://github.com/joostgrunwald.png?size=50" width="50" height="50"></a></td>
 </tr></table>
 
 # Community

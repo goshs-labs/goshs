@@ -385,7 +385,7 @@ func (fs *FileServer) bulkDownload(w http.ResponseWriter, req *http.Request) {
 			if ok := fs.applyCustomAuth(w, req, acl); !ok {
 				return
 			}
-			if blockListedPath(acl.Block, absPath) {
+			if blockListedPath(acl.Block, absPath) || fs.dirBlockListed(absPath) {
 				fs.handleError(w, req, fmt.Errorf("requested file is blocked"), http.StatusNotFound)
 				return
 			}
@@ -413,6 +413,12 @@ func (fs *FileServer) bulkDownload(w http.ResponseWriter, req *http.Request) {
 			return err
 		}
 		if info.IsDir() {
+			// Do not descend into a folder hidden by a "name/" block entry —
+			// zipping a parent otherwise exported it whole without the caller
+			// needing to know its name (GHSA-5v54-7vcp-2f4h).
+			if fs.dirBlockListed(walkPath) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 

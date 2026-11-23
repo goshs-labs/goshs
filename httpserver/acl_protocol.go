@@ -122,6 +122,44 @@ func blockListedPath(block []string, absPath string) bool {
 	return blockListed(block, canonicalBaseName(absPath))
 }
 
+// blockListedEntry reports whether a directory entry is block-listed: by its
+// bare name, or — for a directory — by the documented "name/" folder
+// convention. Every listing filter must use it; comparing only the bare name
+// never matches a "name/" entry, which left blocked folders visible over
+// WebDAV, FTP, SFTP, SMB and in the ?bulk archive (GHSA-5v54-7vcp-2f4h).
+func blockListedEntry(block []string, name string, isDir bool) bool {
+	return blockListed(block, name) || (isDir && blockListed(block, strings.TrimSuffix(name, "/")+"/"))
+}
+
+// dirBlockListed reports whether absPath is an existing directory hidden by a
+// "name/" entry in its parent's effective ACL — the check HTTP doDir applies
+// before listing a directory. Opening or listing such a directory is refused
+// on every protocol so its contents cannot be enumerated (GHSA-5v54-7vcp-2f4h).
+// The webroot has no parent entry and is never blocked. An unreadable parent
+// ACL fails closed.
+func (fs *FileServer) dirBlockListed(absPath string) bool {
+	root := filepath.Clean(absPath)
+	if root == filepath.Clean(fs.Webroot) {
+		return false
+	}
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	parentACL, err := fs.findEffectiveACL(filepath.Dir(root))
+	if err != nil {
+		return true
+	}
+	if len(parentACL.Block) == 0 {
+		return false
+	}
+	base := filepath.Base(root)
+	if blockListed(parentACL.Block, base+"/") {
+		return true
+	}
+	return needsCanonical(base) && blockListed(parentACL.Block, canonicalBaseName(root)+"/")
+}
+
 // isACLFilePath is isACLFileName for an absolute path, additionally resolving an
 // 8.3 alias of .goshs (e.g. GOSHS~1) to its canonical name so the credential
 // file cannot be served via a short-name spelling (GHSA-wh5w-m4vw-7mjm).
@@ -169,7 +207,7 @@ func (p *ProtocolACL) Allowed(absPath string) bool {
 	if acl.Auth != "" {
 		return false
 	}
-	if blockListedPath(acl.Block, absPath) {
+	if blockListedPath(acl.Block, absPath) || p.fs.dirBlockListed(absPath) {
 		return false
 	}
 	return true
@@ -208,7 +246,7 @@ func (p *ProtocolACL) visible(dir string, acl configFile, name string, isDir boo
 	if isACLFileName(name) {
 		return false
 	}
-	if blockListed(acl.Block, name) {
+	if blockListedEntry(acl.Block, name, isDir) {
 		return false
 	}
 	if isDir {
@@ -273,7 +311,7 @@ func (fs *FileServer) subtreeRemovable(absPath string, satisfied func(configFile
 		}
 		for _, e := range entries {
 			name := e.Name()
-			if blockListed(acl.Block, name) || (e.IsDir() && blockListed(acl.Block, name+"/")) {
+			if blockListedEntry(acl.Block, name, e.IsDir()) {
 				ok = false
 				return filepath.SkipAll
 			}

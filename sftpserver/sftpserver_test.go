@@ -143,7 +143,7 @@ func TestWriteFile(t *testing.T) {
 		Method:   "Writefile",
 		Filepath: "/test.txt",
 	}
-	file, err := writeFile(root, req, "127.0.0.1", sftpserver)
+	file, err := writeFile(root, req, "127.0.0.1", sftpserver, false)
 	require.NoError(t, err)
 	_, err = file.Write([]byte("test content"))
 	require.NoError(t, err)

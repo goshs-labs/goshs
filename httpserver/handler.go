@@ -137,20 +137,12 @@ func (fs *FileServer) static(w http.ResponseWriter, req *http.Request) {
 }
 
 func (fs *FileServer) doDir(file *os.File, w http.ResponseWriter, req *http.Request, upath string, json bool) {
-	// Check if parent folder forbids access to this directory
-	parent := filepath.Dir(file.Name())
-	parentConfig, err := fs.findSpecialFile(parent)
-	if err != nil {
-		logger.Errorf("error reading file based access config: %+v", err)
-	}
-
-	// Get foldername. Resolve the canonical on-disk name so a Windows 8.3
-	// short-name alias of a block-listed directory is still caught; the
-	// trailing-dot/space alias is handled by blockListed's normalization
-	// (GHSA-wh5w-m4vw-7mjm).
-	foldername := canonicalBaseName(file.Name())
-
-	if blockListed(parentConfig.Block, fmt.Sprintf("%s/", foldername)) {
+	// Check if a "name/" block entry hides this directory. dirBlockListed uses
+	// the parent's *effective* ACL (the same merged list the listing filters
+	// with) and resolves 8.3 short-name aliases (GHSA-wh5w-m4vw-7mjm); checking
+	// only the immediate parent's .goshs let an ancestor's entry be bypassed by
+	// requesting the folder directly (GHSA-5v54-7vcp-2f4h).
+	if fs.dirBlockListed(file.Name()) {
 		fs.handleError(w, req, fmt.Errorf("open %s: no such file or directory", file.Name()), 404)
 		return
 	}
@@ -1070,7 +1062,7 @@ func (fs *FileServer) CreateShareHandler(w http.ResponseWriter, r *http.Request)
 		if ok := fs.applyCustomAuth(w, r, acl); !ok {
 			return
 		}
-		if blockListedPath(acl.Block, fpath) {
+		if blockListedPath(acl.Block, fpath) || fs.dirBlockListed(fpath) {
 			fs.handleError(w, r, fmt.Errorf("requested file is blocked"), http.StatusNotFound)
 			return
 		}

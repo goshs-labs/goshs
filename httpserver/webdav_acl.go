@@ -170,7 +170,7 @@ func (fs *FileServer) webdavEnforceACL(w http.ResponseWriter, r *http.Request) b
 	if !fs.applyCustomAuth(w, r, acl) {
 		return false
 	}
-	if blockListedPath(acl.Block, abs) {
+	if blockListedPath(acl.Block, abs) || fs.dirBlockListed(abs) {
 		http.NotFound(w, r)
 		return false
 	}
@@ -213,7 +213,7 @@ func (a webdavACLFileSystem) aclError(ctx context.Context, name string) error {
 	if acl.Auth != "" && !aclSatisfied(reqFromContext(ctx), acl) {
 		return os.ErrPermission
 	}
-	if blockListedPath(acl.Block, abs) {
+	if blockListedPath(acl.Block, abs) || a.srv.dirBlockListed(abs) {
 		return os.ErrNotExist
 	}
 	return nil
@@ -302,7 +302,7 @@ func (f aclFile) Readdir(count int) ([]os.FileInfo, error) {
 		if isACLFileName(name) {
 			continue
 		}
-		if blockListed(acl.Block, name) {
+		if blockListedEntry(acl.Block, name, fi.IsDir()) {
 			continue
 		}
 		// A subdirectory may add its own auth requirement; hide it if unmet.

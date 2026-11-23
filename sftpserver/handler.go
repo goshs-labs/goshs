@@ -67,7 +67,9 @@ func (h *UploadOnlyHandler) Fileread(r *sftp.Request) (io.ReaderAt, error) {
 }
 
 func (h *UploadOnlyHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
-	return writeFile(h.Root, r, h.ClientIP, h.SFTPServer)
+	// A drop box must not let a client overwrite what is already in it
+	// (GHSA-c3p2-6762-cf9j).
+	return writeFile(h.Root, r, h.ClientIP, h.SFTPServer, true)
 }
 
 func (h *UploadOnlyHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
@@ -101,7 +103,7 @@ func (h *DefaultHandler) Fileread(r *sftp.Request) (io.ReaderAt, error) {
 }
 
 func (h *DefaultHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
-	return writeFile(h.Root, r, h.ClientIP, h.SFTPServer)
+	return writeFile(h.Root, r, h.ClientIP, h.SFTPServer, h.SFTPServer.NoDelete || h.SFTPServer.UploadOnly)
 }
 
 func (h *DefaultHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {

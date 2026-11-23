@@ -380,6 +380,18 @@ matching update.
   `FileRenameInformation` (via `ProtocolACL.RenameAllowed`). Tests:
   `httpserver/rename_acl_test.go`, `{ftpserver,sftpserver,smbserver}/acl_test.go`. Any new
   rename/move sink must go through it.
+- **`"name/"` folder block entries must be honoured everywhere, not just the HTTP
+  listing.** The bare-name compare (`blockListed`/`blockListedPath`) never matches a
+  `"name/"` entry, so WebDAV PROPFIND, FTP/SFTP/SMB listings and the `?bulk` zip of a
+  parent listed and served blocked folders — **GHSA-5v54-7vcp-2f4h**. Use
+  `blockListedEntry(block, name, isDir)` in every listing filter (`ProtocolACL.visible`,
+  `aclFile.Readdir`, `subtreeRemovable`) and `FileServer.dirBlockListed(abs)` (existing
+  dir hidden by its parent's *effective* ACL; webroot never; unreadable ACL fails
+  closed) at every open/list/select site: `ProtocolACL.Allowed`, `webdavEnforceACL`,
+  `aclError`, `doDir` (formerly only the immediate parent's `.goshs`), bulk top-level
+  selection, the bulk walker (`filepath.SkipDir`) and the share-token mint. As
+  documented, files *inside* a blocked folder stay reachable by exact path on every
+  protocol (HTTP parity). Tests: `httpserver/block_folder_test.go`.
 - **Bulk download** zip walker enforces per-file ACL and excludes `.goshs` during the
   recursive walk (regression-tested in `httpserver/bulk_acl_test.go`) — a prior bug let
   parent-dir bulk selection bypass nested `.goshs` auth/block.
@@ -399,7 +411,15 @@ matching update.
   pre-existing files. This invariant is enforced per-protocol and must stay in lockstep:
   HTTP/WebDAV (`updown.go`, `webdav_acl.go` — incl. the `LOCK` verb, which plants
   lock-null files), FTP (`noDeleteFs`), SFTP (`helper.go`), TFTP (`handleWrite`), and
-  SMB. SMB routes all four of its sinks — WRITE opcode (`handleWrite`), overwrite
+  SMB. FTP's `noDeleteFs` backs **both** flags (`clientFs()` wraps it for
+  `NoDelete || UploadOnly`; upload-only previously only blocked reads, so STOR/RNFR/
+  DELE/SITE RMDIR destroyed drop-box content — **GHSA-c3p2-6762-cf9j**) and refuses
+  *every* write open of an existing file except a pure `O_APPEND` (ftpserverlib opens
+  `REST n` + `STOR` as `O_WRONLY|O_CREATE` without `O_TRUNC` and seeks, an in-place
+  overwrite — **GHSA-qwpj-g46h-59wx**); new files get `O_EXCL`. SFTP `writeFile` takes
+  `noClobber` (UploadOnlyHandler always true; DefaultHandler for either flag) and
+  creates `O_EXCL`. Tests: `ftpserver/modeflags_test.go` (incl. a raw-protocol E2E
+  REST+STOR), `sftpserver/handler_test.go`. SMB routes all four of its sinks — WRITE opcode (`handleWrite`), overwrite
   dispositions + `Truncate` (`handleCreate`/`handleSetInfo`), and `FileRenameInformation`
   — through `SMBServer.protectExisting(localPath)`, which returns true only when a flag
   is set **and** the path is not in `newlyCreatedPaths` (so the operator's own
