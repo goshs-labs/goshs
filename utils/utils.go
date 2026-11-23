@@ -99,11 +99,30 @@ func GenerateHashedPassword(password []byte) string {
 	return string(bytes)
 }
 
-func RegisterZeroconfMDNS(web bool, ssl bool, webPort int, webdav bool, webdavPort int, smtp bool, smtpPort int, dns bool, dnsPort int, smb bool, smbPort int, ldap bool, ldapPort int, ftp bool, ftpSFTPMode bool, ftpPort int, tftp bool, tftpPort int) error {
+// RegisterZeroconfMDNS advertises the enabled services via mDNS. The
+// registrations stay live until the returned shutdown func is called (which
+// sends the goodbye packets); callers must keep it and call it on exit.
+// Previously each registration was deferred-shutdown inside this function, so
+// every service was withdrawn the moment registration returned. On error,
+// anything already registered is withdrawn again and shutdown is a no-op.
+func RegisterZeroconfMDNS(web bool, ssl bool, webPort int, webdav bool, webdavPort int, smtp bool, smtpPort int, dns bool, dnsPort int, smb bool, smbPort int, ldap bool, ldapPort int, ftp bool, ftpSFTPMode bool, ftpPort int, tftp bool, tftpPort int) (shutdown func(), err error) {
+	var servers []*zeroconf.Server
+	shutdownAll := func() {
+		for _, srv := range servers {
+			srv.Shutdown()
+		}
+	}
+	defer func() {
+		if err != nil {
+			shutdownAll()
+			shutdown = func() {}
+		}
+	}()
+
 	// Register zeroconf mDNS
 	hostname, err := os.Hostname()
 	if err != nil {
-		return fmt.Errorf("cannot get hostname for mDNS: %+v", err)
+		return nil, fmt.Errorf("cannot get hostname for mDNS: %+v", err)
 	}
 	// Remove duplicate .local if applicable
 	hostname = strings.TrimSuffix(hostname, ".local")
@@ -129,9 +148,9 @@ func RegisterZeroconfMDNS(web bool, ssl bool, webPort int, webdav bool, webdavPo
 			nil,
 		)
 		if err != nil {
-			return fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
+			return nil, fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
 		}
-		defer zero.Shutdown()
+		servers = append(servers, zero)
 
 		logger.Infof("mDNS service registered as %s://%s.local:%d", out, hostname, webPort)
 	}
@@ -156,9 +175,9 @@ func RegisterZeroconfMDNS(web bool, ssl bool, webPort int, webdav bool, webdavPo
 			nil,
 		)
 		if err != nil {
-			return fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
+			return nil, fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
 		}
-		defer zeroDav.Shutdown()
+		servers = append(servers, zeroDav)
 
 		logger.Infof("mDNS service registered as %s://%s.local:%d", out, hostname, webdavPort)
 	}
@@ -174,9 +193,9 @@ func RegisterZeroconfMDNS(web bool, ssl bool, webPort int, webdav bool, webdavPo
 			nil,
 		)
 		if err != nil {
-			return fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
+			return nil, fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
 		}
-		defer zeroDav.Shutdown()
+		servers = append(servers, zeroDav)
 
 		logger.Infof("mDNS service registered as smtp://%s.local:%d", hostname, smtpPort)
 	}
@@ -192,9 +211,9 @@ func RegisterZeroconfMDNS(web bool, ssl bool, webPort int, webdav bool, webdavPo
 			nil,
 		)
 		if err != nil {
-			return fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
+			return nil, fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
 		}
-		defer zeroDav.Shutdown()
+		servers = append(servers, zeroDav)
 
 		logger.Infof("mDNS service registered as dns://%s.local:%d", hostname, dnsPort)
 	}
@@ -210,9 +229,9 @@ func RegisterZeroconfMDNS(web bool, ssl bool, webPort int, webdav bool, webdavPo
 			nil,
 		)
 		if err != nil {
-			return fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
+			return nil, fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
 		}
-		defer zeroDav.Shutdown()
+		servers = append(servers, zeroDav)
 
 		logger.Infof("mDNS service registered as smb://%s.local:%d", hostname, smbPort)
 	}
@@ -228,9 +247,9 @@ func RegisterZeroconfMDNS(web bool, ssl bool, webPort int, webdav bool, webdavPo
 			nil,
 		)
 		if err != nil {
-			return fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
+			return nil, fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
 		}
-		defer zeroDav.Shutdown()
+		servers = append(servers, zeroDav)
 
 		logger.Infof("mDNS service registered as ldap://%s.local:%d", hostname, ldapPort)
 	}
@@ -259,9 +278,9 @@ func RegisterZeroconfMDNS(web bool, ssl bool, webPort int, webdav bool, webdavPo
 			nil,
 		)
 		if err != nil {
-			return fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
+			return nil, fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
 		}
-		defer zeroFTP.Shutdown()
+		servers = append(servers, zeroFTP)
 
 		logger.Infof("mDNS service registered as %s://%s.local:%d", ftpProto, hostname, ftpPort)
 	}
@@ -277,12 +296,12 @@ func RegisterZeroconfMDNS(web bool, ssl bool, webPort int, webdav bool, webdavPo
 			nil,
 		)
 		if err != nil {
-			return fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
+			return nil, fmt.Errorf("zeroconf mDNS did not register successfully: %+v", err)
 		}
-		defer zeroTFTP.Shutdown()
+		servers = append(servers, zeroTFTP)
 
 		logger.Infof("mDNS service registered as tftp://%s.local:%d", hostname, tftpPort)
 	}
 
-	return nil
+	return shutdownAll, nil
 }
