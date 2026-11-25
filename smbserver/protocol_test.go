@@ -2,6 +2,7 @@ package smbserver
 
 import (
 	"encoding/binary"
+	"strings"
 	"testing"
 	"time"
 
@@ -273,4 +274,73 @@ func TestPutWinTime(t *testing.T) {
 	putWinTime(buf, 0, t1)
 	const unixEpochAsFiletime uint64 = 116444736000000000
 	require.Equal(t, unixEpochAsFiletime, le64(buf, 0))
+}
+
+// wildcardMatchRecursive is the former exponential matcher, kept as the
+// reference for the equivalence test below.
+func wildcardMatchRecursive(p, s string) bool {
+	if p == "*" || p == "*.*" {
+		return true
+	}
+	if p == "" {
+		return s == ""
+	}
+	if p[0] == '*' {
+		for i := 0; i <= len(s); i++ {
+			if wildcardMatchRecursive(p[1:], s[i:]) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(s) == 0 {
+		return false
+	}
+	if p[0] == '?' || p[0] == s[0] {
+		return wildcardMatchRecursive(p[1:], s[1:])
+	}
+	return false
+}
+
+// TestWildcardMatch_EquivalentToRecursive checks the linear matcher against the
+// old recursive one over every short pattern/name from a small alphabet.
+func TestWildcardMatch_EquivalentToRecursive(t *testing.T) {
+	patAlpha := []string{"a", "b", ".", "*", "?"}
+	nameAlpha := []string{"a", "b", "."}
+	var gen func(alpha []string, n int) []string
+	gen = func(alpha []string, n int) []string {
+		out := []string{""}
+		prev := []string{""}
+		for i := 0; i < n; i++ {
+			var next []string
+			for _, p := range prev {
+				for _, c := range alpha {
+					next = append(next, p+c)
+				}
+			}
+			out = append(out, next...)
+			prev = next
+		}
+		return out
+	}
+	pats := gen(patAlpha, 5)
+	names := gen(nameAlpha, 5)
+	for _, p := range pats {
+		for _, n := range names {
+			if got, want := wildcardMatch(p, n), wildcardMatchRecursive(p, n); got != want {
+				t.Fatalf("wildcardMatch(%q, %q) = %v, recursive = %v", p, n, got, want)
+			}
+		}
+	}
+}
+
+// TestWildcardMatch_PathologicalPatternIsFast is the GHSA-3vjf-pqxp-rwpc
+// regression: a many-star pattern against a long non-matching name must not
+// backtrack exponentially.
+func TestWildcardMatch_PathologicalPatternIsFast(t *testing.T) {
+	name := strings.Repeat("a", 255)
+	pattern := strings.Repeat("a*", 200) + "b"
+	start := time.Now()
+	require.False(t, matchPattern(pattern, name))
+	require.Less(t, time.Since(start), time.Second)
 }

@@ -241,3 +241,20 @@ func TestCheck_NoHTTPWithInvisibleFails(t *testing.T) {
 	_, err := Check(&options.Options{NoHTTP: true, Invisible: true, FTP: true})
 	require.Error(t, err)
 }
+
+// GHSA-qjjr-pc25-pj69: SMB (NTLM) needs the plaintext password, so a bcrypt -b
+// must be refused with -smb instead of the hash becoming the SMB password.
+func TestFurtherProcessing_SMBWithBcryptRefused(t *testing.T) {
+	opts := &options.Options{
+		BasicAuth: "user:$2a$14$ydRJ//Ob4SctB/D7o.rvU.LmPs/vwXkeXCbtpCqzgOJDSShLgiY52",
+		SMB:       true,
+	}
+	_, err := FurtherProcessing(opts)
+	require.Error(t, err)
+}
+
+func TestFurtherProcessing_SMBWithPlaintextAllowed(t *testing.T) {
+	opts := &options.Options{BasicAuth: "user:password", SMB: true}
+	_, err := FurtherProcessing(opts)
+	require.NoError(t, err)
+}

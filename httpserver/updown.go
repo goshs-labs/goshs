@@ -31,6 +31,19 @@ func (fs *FileServer) prepareWrite(w http.ResponseWriter, req *http.Request, dir
 	return true
 }
 
+// writeBlockListed reports whether absPath is hidden by the .goshs block list
+// governing it (a block-listed file name, or a "name/"-blocked folder). Every
+// other access path treats such a target as non-existent, so HTTP writes must
+// refuse it too instead of overwriting it (GHSA-jghp-446c-v7gp). An unreadable
+// ACL fails closed.
+func (fs *FileServer) writeBlockListed(absPath string) bool {
+	acl, err := fs.findEffectiveACL(filepath.Dir(absPath))
+	if err != nil {
+		return true
+	}
+	return blockListedPath(acl.Block, absPath) || fs.dirBlockListed(absPath)
+}
+
 // put handles the PUT request to upload files
 func (fs *FileServer) put(w http.ResponseWriter, req *http.Request) {
 	if !fs.checkCSRF(w, req) {
@@ -66,6 +79,12 @@ func (fs *FileServer) put(w http.ResponseWriter, req *http.Request) {
 
 	// Enforce .goshs ACL and upload size limit
 	if !fs.prepareWrite(w, req, filepath.Dir(savepath)) {
+		return
+	}
+
+	// Refuse block-listed targets like read/DELETE/WebDAV do (same 404).
+	if fs.writeBlockListed(savepath) {
+		fs.handleError(w, req, fmt.Errorf("open %s: no such file or directory", savepath), http.StatusNotFound)
 		return
 	}
 
@@ -211,6 +230,13 @@ func (fs *FileServer) upload(w http.ResponseWriter, req *http.Request) {
 				logger.Warnf("blocked nested upload into ACL-protected directory: %q", rawName)
 				continue
 			}
+		}
+
+		// A block-listed name is non-existent on every other path; never let
+		// the final rename replace it (GHSA-jghp-446c-v7gp).
+		if fs.writeBlockListed(finalPath) {
+			logger.Warnf("blocked upload onto block-listed path: %q", rawName)
+			continue
 		}
 
 		// The final os.Rename clobbers any existing same-named file, destroying

@@ -178,6 +178,8 @@ These are the awesome contributors that made `goshs` even more secure :heart:
   <td align="center"><a href="https://github.com/saideep632"><img src="https://github.com/saideep632.png?size=50" width="50" height="50"></a></td>
   <td align="center"><a href="https://github.com/p-w"><img src="https://github.com/p-w.png?size=50" width="50" height="50"></a></td>
   <td align="center"><a href="https://github.com/joostgrunwald"><img src="https://github.com/joostgrunwald.png?size=50" width="50" height="50"></a></td>
+  <td align="center"><a href="https://github.com/mercury-redstone-research"><img src="https://github.com/mercury-redstone-research.png?size=50" width="50" height="50"></a></td>
+  <td align="center"><a href="https://github.com/Wei3316644922"><img src="https://github.com/Wei3316644922.png?size=50" width="50" height="50"></a></td>
 </tr></table>
 
 # Community

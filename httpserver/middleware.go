@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 	"goshs.de/goshs/v2/logger"
+	"goshs.de/goshs/v2/utils"
 )
 
 const (
@@ -81,15 +82,10 @@ func (fs *FileServer) verifyCredentials(r *http.Request) (authVal string, ok boo
 	entry.count++
 	fs.authFailMu.Unlock()
 
-	var verified bool
-	if strings.HasPrefix(fs.Pass, "$2a$") {
-		if username == fs.User {
-			verified = bcrypt.CompareHashAndPassword([]byte(fs.Pass), []byte(password)) == nil
-		}
-	} else {
-		verified = subtle.ConstantTimeCompare([]byte(username), []byte(fs.User)) == 1 &&
-			subtle.ConstantTimeCompare([]byte(password), []byte(fs.Pass)) == 1
-	}
+	// utils.CheckPassword recognises every bcrypt prefix ($2a$/$2b$/$2y$), so
+	// a hash is never compared as a literal password (GHSA-qjjr-pc25-pj69).
+	verified := subtle.ConstantTimeCompare([]byte(username), []byte(fs.User)) == 1 &&
+		utils.CheckPassword(fs.Pass, password)
 
 	if !verified {
 		// The attempt was already counted above. Re-read the map rather than

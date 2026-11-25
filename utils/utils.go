@@ -2,6 +2,7 @@
 package utils
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"mime"
 	"net"
@@ -85,6 +86,22 @@ func GetAllIPAddresses() (map[string]string, error) {
 		ifaceAddress[i.Name] = ip
 	}
 	return ifaceAddress, nil
+}
+
+// IsBcryptHash reports whether s is a bcrypt hash (the form `goshs -H` prints
+// and the docs recommend for -b).
+func IsBcryptHash(s string) bool {
+	return strings.HasPrefix(s, "$2a$") || strings.HasPrefix(s, "$2b$") || strings.HasPrefix(s, "$2y$")
+}
+
+// CheckPassword reports whether supplied is the password configured with -b.
+// The configured value is either the plaintext password or its bcrypt hash; a
+// hash is never accepted as the password itself (GHSA-qjjr-pc25-pj69).
+func CheckPassword(configured, supplied string) bool {
+	if IsBcryptHash(configured) {
+		return bcrypt.CompareHashAndPassword([]byte(configured), []byte(supplied)) == nil
+	}
+	return subtle.ConstantTimeCompare([]byte(supplied), []byte(configured)) == 1
 }
 
 // GenerateHashPassword will take a plaintext masked password and return a bcrypt hash

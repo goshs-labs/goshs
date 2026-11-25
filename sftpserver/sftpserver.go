@@ -14,6 +14,7 @@ import (
 	"goshs.de/goshs/v2/httpserver"
 	"goshs.de/goshs/v2/logger"
 	"goshs.de/goshs/v2/options"
+	"goshs.de/goshs/v2/utils"
 	"goshs.de/goshs/v2/webhook"
 )
 
@@ -78,6 +79,13 @@ func (s *SFTPServer) Bind() error {
 }
 
 // Start initializes and starts the SFTP server
+// checkPassword verifies SFTP password credentials against -b. The configured
+// password may be a bcrypt hash, which must be verified as a hash rather than
+// compared as the literal password (GHSA-qjjr-pc25-pj69).
+func (s *SFTPServer) checkPassword(user, password string) bool {
+	return subtle.ConstantTimeCompare([]byte(user), []byte(s.Username)) == 1 && utils.CheckPassword(s.Password, password)
+}
+
 func (s *SFTPServer) Start() error {
 	var err error
 
@@ -113,7 +121,7 @@ func (s *SFTPServer) Start() error {
 
 	if s.Username != "" || s.Password != "" {
 		sshServer.PasswordHandler = func(ctx ssh.Context, password string) bool {
-			return subtle.ConstantTimeCompare([]byte(ctx.User()), []byte(s.Username)) == 1 && subtle.ConstantTimeCompare([]byte(password), []byte(s.Password)) == 1
+			return s.checkPassword(ctx.User(), password)
 		}
 	}
 

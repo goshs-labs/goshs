@@ -12,6 +12,7 @@ import (
 	"goshs.de/goshs/v2/logger"
 	"goshs.de/goshs/v2/options"
 	"goshs.de/goshs/v2/update"
+	"goshs.de/goshs/v2/utils"
 )
 
 func Sanitize(opts *options.Options) (*options.Options, error) {
@@ -45,7 +46,7 @@ func Check(opts *options.Options) (*options.Options, error) {
 			return opts, fmt.Errorf("%s", "The config file is accessible via goshs and is writeable by the user running goshs. This is a security issue. Read the docs at https://goshs.de/en/usage/config/index.html")
 		}
 
-		if !strings.Contains(opts.BasicAuth, "$2a$") {
+		if _, pass, _ := strings.Cut(opts.BasicAuth, ":"); !utils.IsBcryptHash(pass) {
 			logger.Warn("The password in the config file is not hashed. This is not recommended. Use goshs -H to hash the password.")
 		}
 	}
@@ -168,6 +169,12 @@ func FurtherProcessing(opts *options.Options) (*options.Options, error) {
 		}
 		opts.Username = auth[0]
 		opts.Password = auth[1]
+		// NTLM (SMB) is computed from the plaintext password. With the bcrypt
+		// form of -b the hash string itself would become the SMB password
+		// (GHSA-qjjr-pc25-pj69), so refuse the combination.
+		if opts.SMB && utils.IsBcryptHash(opts.Password) {
+			return opts, fmt.Errorf("-smb needs the plaintext password in -b: SMB (NTLM) cannot verify a bcrypt hash")
+		}
 	}
 
 	// If Let's Encrypt is in play we need to fetch the key and cert, write them to disc and set their path in MyKey and MyCert

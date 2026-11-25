@@ -52,6 +52,7 @@ const (
 	STATUS_END_OF_FILE                uint32 = 0xC0000011
 	STATUS_BAD_NETWORK_NAME           uint32 = 0xC00000CC
 	STATUS_LOGON_FAILURE              uint32 = 0xC000006D
+	STATUS_USER_SESSION_DELETED       uint32 = 0xC0000203
 	STATUS_NOT_SUPPORTED              uint32 = 0xC00000BB
 	STATUS_OBJECT_PATH_NOT_FOUND      uint32 = 0xC000003A
 	STATUS_DIRECTORY_NOT_EMPTY        uint32 = 0xC0000101
@@ -332,28 +333,43 @@ func matchPattern(pattern, name string) bool {
 	return wildcardMatch(p, n)
 }
 
+// wildcardMatch is an iterative greedy matcher with single-star backtracking:
+// O(len(p)*len(s)) worst case. The former recursive version tried every split
+// for every '*' and was exponential in the star count, so an unauthenticated
+// QUERY_DIRECTORY SearchPattern like "aaaaaaaaaa*b" (many stars) pinned a CPU
+// core indefinitely (GHSA-3vjf-pqxp-rwpc). Semantics are unchanged: a
+// remaining pattern of exactly "*.*" matches any rest (DOS-style).
 func wildcardMatch(p, s string) bool {
-	if p == "*" || p == "*.*" {
-		return true
-	}
-	if p == "" {
-		return s == ""
-	}
-	if p[0] == '*' {
-		for i := 0; i <= len(s); i++ {
-			if wildcardMatch(p[1:], s[i:]) {
+	pi, si := 0, 0
+	starP, starS := -1, 0
+	for si < len(s) {
+		if pi < len(p) && p[pi] == '*' {
+			if p[pi:] == "*.*" {
 				return true
 			}
+			starP, starS = pi, si
+			pi++
+			continue
+		}
+		if pi < len(p) && (p[pi] == '?' || p[pi] == s[si]) {
+			pi++
+			si++
+			continue
+		}
+		if starP >= 0 {
+			starS++
+			pi, si = starP+1, starS
+			continue
 		}
 		return false
 	}
-	if len(s) == 0 {
-		return false
+	for pi < len(p) && p[pi] == '*' {
+		if p[pi:] == "*.*" {
+			return true
+		}
+		pi++
 	}
-	if p[0] == '?' || p[0] == s[0] {
-		return wildcardMatch(p[1:], s[1:])
-	}
-	return false
+	return pi == len(p)
 }
 
 // align8 rounds n up to the next multiple of 8.
