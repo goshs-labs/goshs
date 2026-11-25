@@ -19,6 +19,36 @@ type smbSession struct {
 	Domain     string
 	Challenge  *NTLMChallenge // active challenge; nil after auth completes
 	SigningKey []byte         // 16-byte HMAC-SHA256 signing key; nil if not signing
+
+	// conns holds the TCP connections that completed SESSION_SETUP for this
+	// session. Only those may use it: the SessionID in a request header is
+	// client-chosen, so trusting it alone let any connection reuse another
+	// client's authenticated session (GHSA-grm2-rp49-4ffc / GHSA-pw36-69cp-8hjp).
+	conns map[*connState]struct{}
+}
+
+// bindLocked marks sess as authenticated on cs. Caller holds sess.mu (write).
+func (sess *smbSession) bindLocked(cs *connState) {
+	if sess.conns == nil {
+		sess.conns = make(map[*connState]struct{})
+	}
+	sess.conns[cs] = struct{}{}
+}
+
+// boundTo reports whether cs completed SESSION_SETUP for sess.
+func (sess *smbSession) boundTo(cs *connState) bool {
+	sess.mu.RLock()
+	defer sess.mu.RUnlock()
+	_, ok := sess.conns[cs]
+	return ok
+}
+
+// authedOn reports whether sess is authenticated and was set up on cs.
+func (sess *smbSession) authedOn(cs *connState) bool {
+	sess.mu.RLock()
+	defer sess.mu.RUnlock()
+	_, bound := sess.conns[cs]
+	return sess.Authed && bound
 }
 
 // smbTree tracks a connected SMB2 tree (share).
@@ -60,7 +90,8 @@ type pendingNotify struct {
 
 // connState holds all state for a single TCP connection.
 // Sessions are NOT stored here — they live in SMBServer.sessions (server-wide)
-// so that a session established on one TCP connection is visible to another.
+// — but a session is only usable on the connections bound to it
+// (smbSession.conns).
 type connState struct {
 	mu sync.Mutex
 
@@ -76,6 +107,11 @@ type connState struct {
 	nextTreeID uint32
 
 	pendingSessionID uint64 // transient: session ID being assigned during NTLM Type1/Type2
+
+	// sessIDs are the sessions this connection created or bound; they are
+	// released when the connection closes so a session never outlives every
+	// connection that authenticated it.
+	sessIDs map[uint64]struct{}
 
 	// downgrade ratchet: set when we send a Type 2 challenge, cleared when
 	// we receive a Type 3.  If the connection closes with this still set the
@@ -94,9 +130,25 @@ type connState struct {
 func newConnState() *connState {
 	return &connState{
 		trees:        make(map[uint32]*smbTree),
+		sessIDs:      make(map[uint64]struct{}),
 		nextTreeID:   1,
 		nextHandleID: 1,
 	}
+}
+
+// trackSession records that this connection created or bound session id.
+func (c *connState) trackSession(id uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sessIDs[id] = struct{}{}
+}
+
+// ownsSession reports whether this connection created or bound session id.
+func (c *connState) ownsSession(id uint64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.sessIDs[id]
+	return ok
 }
 
 // ── Tree management ────────────────────────────────────────────────────────

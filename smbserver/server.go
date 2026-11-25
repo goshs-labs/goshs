@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"goshs.de/goshs/v2/httpserver"
@@ -43,8 +42,7 @@ type SMBServer struct {
 
 	ln net.Listener // bound by Bind, served by Start
 
-	serverGUID    [16]byte // random, set once at Start
-	nextSessionID uint64   // server-wide session ID counter (atomic)
+	serverGUID [16]byte // random, set once at Start
 
 	sessions        sync.Map // uint64 → *smbSession; server-wide so multi-connection clients work
 	clientDowngrade sync.Map // string (client IP) → NTLMDowngradeLevel; tracks per-client downgrade progress
@@ -131,13 +129,71 @@ func (s *SMBServer) Start() {
 }
 
 // ── Server-wide session management ─────────────────────────────────────────
-// Sessions are keyed by session ID globally so that a client using multiple
-// TCP connections (smbclient, Nautilus, Windows) finds the same session.
+// Sessions are keyed by session ID globally, but a session is only usable on
+// the connections that completed SESSION_SETUP for it (smbSession.conns): the
+// SessionID in a request header is client-chosen, and trusting it alone let an
+// unauthenticated connection reuse another client's session
+// (GHSA-grm2-rp49-4ffc / GHSA-pw36-69cp-8hjp). We only speak SMB 2.x, which has
+// no multichannel session binding, so every connection authenticates itself.
 
-func (s *SMBServer) getOrCreateSession(id uint64) *smbSession {
+// getOrCreateSession returns session id, creating it if needed. A session
+// created here is tracked on cs so it is released when cs closes.
+func (s *SMBServer) getOrCreateSession(cs *connState, id uint64) *smbSession {
 	sess := &smbSession{ID: id}
-	actual, _ := s.sessions.LoadOrStore(id, sess)
+	actual, loaded := s.sessions.LoadOrStore(id, sess)
+	if !loaded {
+		cs.trackSession(id)
+	}
 	return actual.(*smbSession)
+}
+
+// createSession allocates a new session under an unpredictable, non-zero ID
+// from crypto/rand. A sequential counter made live IDs trivially guessable.
+func (s *SMBServer) createSession(cs *connState) *smbSession {
+	var b [8]byte
+	for {
+		_, _ = rand.Read(b[:])
+		id := binary.LittleEndian.Uint64(b[:])
+		if id == 0 || id == ^uint64(0) { // 0 = none, all-ones = compound "related" sentinel
+			continue
+		}
+		sess := &smbSession{ID: id}
+		if _, loaded := s.sessions.LoadOrStore(id, sess); loaded {
+			continue
+		}
+		cs.trackSession(id)
+		return sess
+	}
+}
+
+// bindSessionLocked marks sess authenticated on cs. Caller holds sess.mu (write).
+func bindSessionLocked(cs *connState, sess *smbSession) {
+	sess.Authed = true
+	sess.bindLocked(cs)
+	cs.trackSession(sess.ID)
+}
+
+// releaseConnSessions unbinds cs from the sessions it created or bound and
+// drops any session no live connection is bound to any more. Previously a
+// session lived until an explicit LOGOFF, so one past login kept it usable.
+func (s *SMBServer) releaseConnSessions(cs *connState) {
+	cs.mu.Lock()
+	ids := cs.sessIDs
+	cs.sessIDs = make(map[uint64]struct{})
+	cs.mu.Unlock()
+	for id := range ids {
+		sess := s.getSession(id)
+		if sess == nil {
+			continue
+		}
+		sess.mu.Lock()
+		delete(sess.conns, cs)
+		orphan := len(sess.conns) == 0
+		sess.mu.Unlock()
+		if orphan {
+			s.sessions.CompareAndDelete(id, sess)
+		}
+	}
 }
 
 func (s *SMBServer) getSession(id uint64) *smbSession {
@@ -146,21 +202,6 @@ func (s *SMBServer) getSession(id uint64) *smbSession {
 		return nil
 	}
 	return v.(*smbSession)
-}
-
-func (s *SMBServer) deleteSession(id uint64) {
-	s.sessions.Delete(id)
-}
-
-func (s *SMBServer) rekeySession(oldID, newID uint64) *smbSession {
-	v, ok := s.sessions.LoadAndDelete(oldID)
-	if !ok {
-		return nil
-	}
-	sess := v.(*smbSession)
-	sess.ID = newID
-	s.sessions.Store(newID, sess)
-	return sess
 }
 
 // ── Connection handler ─────────────────────────────────────────────────────
@@ -177,6 +218,7 @@ func (s *SMBServer) handleConn(conn net.Conn) {
 
 	cs := newConnState()
 	cs.conn = conn
+	defer s.releaseConnSessions(cs)
 	defer cs.closeAllHandles()
 	defer s.removeConnWatches(conn)
 	defer func() {
@@ -289,7 +331,7 @@ func (s *SMBServer) handleConn(conn net.Conn) {
 				if len(resp) >= 64 {
 					if reqFlags&0x00000008 != 0 { // SMB2_FLAGS_SIGNED
 						sessID := binary.LittleEndian.Uint64(cmdBuf[40:])
-						if sess := s.getSession(sessID); sess != nil {
+						if sess := s.getSession(sessID); sess != nil && sess.boundTo(cs) {
 							sess.mu.RLock()
 							sk := sess.SigningKey
 							sess.mu.RUnlock()
@@ -492,9 +534,9 @@ func (s *SMBServer) handleSessionSetup(cs *connState, h *smb2Hdr, buf []byte, re
 		if s.Username != "" || s.Password != "" {
 			return errResp(h, STATUS_LOGON_FAILURE)
 		}
-		sess := s.getOrCreateSession(h.SessionID)
+		sess := s.getOrCreateSession(cs, h.SessionID)
 		sess.mu.Lock()
-		sess.Authed = true
+		bindSessionLocked(cs, sess)
 		sess.Username = "anonymous"
 		sess.mu.Unlock()
 		logger.Debugf("SMB: anonymous session (empty blob) from %s", remoteAddr)
@@ -517,8 +559,7 @@ func (s *SMBServer) handleSessionSetup(cs *connState, h *smb2Hdr, buf []byte, re
 	// supported mechTypes list and expect us to echo back our preferred mech
 	// with STATUS_MORE_PROCESSING. They will then send a real NTLM Type 1.
 	if len(ntlmToken) < 8 {
-		sess := s.getOrCreateSession(h.SessionID)
-		_ = sess
+		_ = s.getOrCreateSession(cs, h.SessionID)
 		// Respond with our SPNEGO mechTypes so the client knows to use NTLMSSP.
 		// STATUS_MORE_PROCESSING tells it to continue the exchange.
 		logger.Debugf("SMB: SPNEGO mechTypes-only from %s, prompting NTLM", remoteAddr)
@@ -545,12 +586,10 @@ func (s *SMBServer) handleSessionSetup(cs *connState, h *smb2Hdr, buf []byte, re
 			if cs.pendingSessionID != 0 {
 				newSessID = cs.pendingSessionID
 			} else {
-				// Use a server-wide counter so every TCP connection gets a
-				// unique session ID. Per-connection counters would produce the
-				// same value (e.g. 4294967298) for every new connection, which
-				// confuses clients that open multiple simultaneous connections
-				// (Nautilus, Windows) and track sessions globally.
-				newSessID = atomic.AddUint64(&s.nextSessionID, 1) | (1 << 32)
+				// Server-wide unique, random ID: per-connection counters gave
+				// every connection the same value (confusing multi-connection
+				// clients), and a global counter was guessable.
+				newSessID = s.createSession(cs).ID
 				cs.pendingSessionID = newSessID
 			}
 		}
@@ -577,13 +616,10 @@ func (s *SMBServer) handleSessionSetup(cs *connState, h *smb2Hdr, buf []byte, re
 			challenge.ClientFlags = le32(ntlmToken, 12)
 		}
 
-		sess := s.getOrCreateSession(h.SessionID)
+		sess := s.getOrCreateSession(cs, newSessID)
 		sess.mu.Lock()
 		sess.Challenge = challenge
 		sess.mu.Unlock()
-		if h.SessionID != newSessID {
-			s.rekeySession(h.SessionID, newSessID)
-		}
 
 		ntlmType2 := challenge.BuildChallengeMessage()
 		spnegoResp := ChallengeToken(ntlmType2)
@@ -602,7 +638,7 @@ func (s *SMBServer) handleSessionSetup(cs *connState, h *smb2Hdr, buf []byte, re
 		// Type 3 received — client did not silently drop after our challenge.
 		cs.challengePending = false
 
-		sess := s.getOrCreateSession(h.SessionID)
+		sess := s.getOrCreateSession(cs, h.SessionID)
 		sess.mu.RLock()
 		challenge := sess.Challenge
 		sess.mu.RUnlock()
@@ -634,7 +670,7 @@ func (s *SMBServer) handleSessionSetup(cs *connState, h *smb2Hdr, buf []byte, re
 				return errResp(h, STATUS_LOGON_FAILURE)
 			}
 			sess.mu.Lock()
-			sess.Authed = true
+			bindSessionLocked(cs, sess)
 			sess.Username = "anonymous"
 			sess.mu.Unlock()
 			logger.Debugf("SMB: null session accepted from %s", remoteAddr)
@@ -766,7 +802,7 @@ func (s *SMBServer) handleSessionSetup(cs *connState, h *smb2Hdr, buf []byte, re
 		}
 
 		sess.mu.Lock()
-		sess.Authed = true
+		bindSessionLocked(cs, sess)
 		sess.Username = captured.Username
 		sess.Domain = captured.Domain
 		if len(signingKey) == 16 {
@@ -824,7 +860,13 @@ func (s *SMBServer) buildSessionSetupResp(h *smb2Hdr, sessID uint64, status uint
 // ── SMB2 Logoff ────────────────────────────────────────────────────────────
 
 func (s *SMBServer) handleLogoff(cs *connState, h *smb2Hdr) []byte {
-	s.deleteSession(h.SessionID)
+	// Only the connection that set up (or created) a session may end it;
+	// otherwise anyone could tear down another client's session.
+	sess := s.getSession(h.SessionID)
+	if sess == nil || !(sess.boundTo(cs) || cs.ownsSession(h.SessionID)) {
+		return errResp(h, STATUS_USER_SESSION_DELETED)
+	}
+	s.sessions.CompareAndDelete(h.SessionID, sess)
 	body := make([]byte, 4)
 	putle16(body, 0, 4) // StructureSize
 	resp := make([]byte, 64+4)
@@ -841,10 +883,15 @@ func (s *SMBServer) handleTreeConnect(cs *connState, h *smb2Hdr, buf []byte) []b
 	}
 	body := buf[64:]
 
-	sess := s.getOrCreateSession(h.SessionID)
-
+	// Look up only (never create), and require the session to be
+	// authenticated on THIS connection (GHSA-grm2-rp49-4ffc).
+	sess := s.getSession(h.SessionID)
+	if sess == nil {
+		logger.Debugf("TREE_CONNECT: access denied for unknown session=%d", h.SessionID)
+		return errResp(h, STATUS_ACCESS_DENIED)
+	}
+	authed := sess.authedOn(cs)
 	sess.mu.RLock()
-	authed := sess.Authed
 	username := sess.Username
 	sess.mu.RUnlock()
 

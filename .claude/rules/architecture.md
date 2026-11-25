@@ -404,6 +404,33 @@ matching update.
   `validReactionEmoji` (`ws/client.go`): ≤32 bytes, valid UTF-8, no control code
   points, and the only ASCII allowed is the keycap bases `0-9#*`. Tests:
   `ws/ws_test.go` (`TestDispatchReadPump_ReactRejectsMarkup`, `TestValidReactionEmoji`).
+- **`-b` may hold a bcrypt hash; every protocol must verify it as a hash.** HTTP/WebDAV
+  (`verifyCredentials`), FTP (`AuthUser`) and SFTP (`SFTPServer.checkPassword`) all go
+  through `utils.CheckPassword` (bcrypt for `$2a$`/`$2b$`/`$2y$`, constant-time compare
+  otherwise). FTP/SFTP previously compared the literal string, so the *hash* logged in
+  and the real password did not — **GHSA-qjjr-pc25-pj69**. NTLM (SMB) needs the plaintext,
+  so `sanity.FurtherProcessing` refuses `-smb` with a hashed `-b`. Tests:
+  `utils/password_test.go`, `{ftpserver,sftpserver}/auth_test.go`, `sanity/checks_test.go`.
+- **SMB sessions are bound to the connection that authenticated them.** The SessionID
+  in a request header is client-chosen; `handleTreeConnect` used to accept any
+  server-wide session with `Authed` set, and IDs came from a sequential counter, so an
+  unauthenticated connection could reuse another client's session (and LOGOFF it) —
+  **GHSA-grm2-rp49-4ffc** (dup **GHSA-pw36-69cp-8hjp**). Now IDs come from `crypto/rand`
+  (`createSession`), every `Authed = true` goes through `bindSessionLocked(cs, sess)`,
+  TREE_CONNECT requires `sess.authedOn(cs)` (lookup only, never create), LOGOFF requires
+  the session to be bound to/created by `cs`, response signing uses only bound sessions,
+  and `releaseConnSessions` drops a session once its last connection closes. We speak
+  SMB 2.x only (no multichannel binding), so every connection authenticates itself.
+  Tests: `smbserver/session_hijack_test.go` (real go-smb2 login + raw second connection).
+- **SMB `QUERY_DIRECTORY` patterns are attacker-controlled**: `wildcardMatch` must stay
+  linear (iterative greedy, single-star backtracking). The former recursive matcher was
+  exponential in the star count — unauthenticated CPU DoS, **GHSA-3vjf-pqxp-rwpc**. Tests
+  in `smbserver/protocol_test.go` (exhaustive equivalence vs the old matcher + timing).
+- **HTTP `PUT` and multipart `upload()` honour the `.goshs` block list** via
+  `FileServer.writeBlockListed` (`blockListedPath` + `dirBlockListed`, checked per part
+  for nested uploads). They only applied the ACL *auth*, so a hidden file could be
+  overwritten/replaced while every other path pretended it did not exist —
+  **GHSA-jghp-446c-v7gp**. Tests: `httpserver/write_block_acl_test.go`.
 - The rogue protocol servers (SMB/LDAP/SMTP/DNS) capture credentials/NTLM by design;
   changes there have real security impact.
 - **`--no-delete` / `--upload-only` mean "no destruction of existing content" across
