@@ -276,6 +276,16 @@ func cmdFile(root string, r *sftp.Request, ip string, sftpServer *SFTPServer) er
 			sftpServer.HandleWebhookSend("sftp", r, ip, true)
 			return nErr
 		}
+		// A permission change is just as destructive: chmod 000 on the root
+		// takes the whole share down on every protocol and survives restarts
+		// (GHSA-rqv7-6c67-mgjf). Setstat only applies the mode, so a request
+		// without the permissions attribute (e.g. times only) stays a no-op.
+		if r.Method == "Setstat" && r.AttrFlags().Permissions {
+			nErr := errors.New("changing permissions not allowed due to 'no delete' option")
+			logger.LogSFTPRequestBlocked(r, ip, nErr)
+			sftpServer.HandleWebhookSend("sftp", r, ip, true)
+			return nErr
+		}
 	}
 
 	switch r.Method {

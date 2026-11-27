@@ -411,6 +411,10 @@ matching update.
   and the real password did not — **GHSA-qjjr-pc25-pj69**. NTLM (SMB) needs the plaintext,
   so `sanity.FurtherProcessing` refuses `-smb` with a hashed `-b`. Tests:
   `utils/password_test.go`, `{ftpserver,sftpserver}/auth_test.go`, `sanity/checks_test.go`.
+  SFTP auth is mandatory, so an **empty** configured password must never authenticate:
+  `sanity.Check` refuses `-ftp-sftp` with `-b 'user:'`, and `SFTPServer.checkPassword`
+  returns false when `Password == ""` (defence in depth) — **GHSA-hhv7-wp66-4vfv**
+  (incomplete fix of CVE-2026-62325). Test: `sftpserver/auth_test.go`.
 - **SMB sessions are bound to the connection that authenticated them.** The SessionID
   in a request header is client-chosen; `handleTreeConnect` used to accept any
   server-wide session with `Authed` set, and IDs came from a sequential counter, so an
@@ -435,7 +439,7 @@ matching update.
   changes there have real security impact.
 - **`--no-delete` / `--upload-only` mean "no destruction of existing content" across
   *every* write protocol** — treat overwrite (truncating open), in-place write,
-  truncate/shrink, and rename/move as deletion-class operations and refuse them for
+  truncate/shrink, rename/move **and metadata changes (chmod/chown/chtimes)** as deletion-class operations and refuse them for
   pre-existing files. This invariant is enforced per-protocol and must stay in lockstep:
   HTTP/WebDAV (`updown.go`, `webdav_acl.go` — incl. the `LOCK` verb, which plants
   lock-null files), FTP (`noDeleteFs`), SFTP (`helper.go`), TFTP (`handleWrite`), and
@@ -446,7 +450,10 @@ matching update.
   `REST n` + `STOR` as `O_WRONLY|O_CREATE` without `O_TRUNC` and seeks, an in-place
   overwrite — **GHSA-qwpj-g46h-59wx**); new files get `O_EXCL`. SFTP `writeFile` takes
   `noClobber` (UploadOnlyHandler always true; DefaultHandler for either flag) and
-  creates `O_EXCL`. Tests: `ftpserver/modeflags_test.go` (incl. a raw-protocol E2E
+  creates `O_EXCL`. Metadata: `noDeleteFs` also refuses `Chmod`/`Chown`/`Chtimes` (FTP
+  `SITE CHMOD`/`MFMT`), and SFTP `cmdFile` refuses a `Setstat` carrying the permissions
+  attribute under `NoDelete` (upload-only SFTP refuses all Filecmd) — `chmod 000 /` took
+  the whole share down persistently, **GHSA-rqv7-6c67-mgjf**. Tests: `ftpserver/modeflags_test.go` (incl. a raw-protocol E2E
   REST+STOR), `sftpserver/handler_test.go`. SMB routes all four of its sinks — WRITE opcode (`handleWrite`), overwrite
   dispositions + `Truncate` (`handleCreate`/`handleSetInfo`), and `FileRenameInformation`
   — through `SMBServer.protectExisting(localPath)`, which returns true only when a flag

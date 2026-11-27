@@ -246,6 +246,23 @@ func (fs *noDeleteFs) Create(name string) (afero.File, error) {
 	return fs.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o666)
 }
 
+// Metadata changes tamper with existing content too: SITE CHMOD 000 on the
+// webroot makes every file unreachable on every protocol (and to the operator)
+// until the modes are restored by hand, and 777 exposes the operator's files to
+// other local users. Refuse them like the other destructive operations
+// (GHSA-rqv7-6c67-mgjf).
+func (fs *noDeleteFs) Chmod(name string, mode os.FileMode) error {
+	return fmt.Errorf("chmod not allowed in no-delete mode")
+}
+
+func (fs *noDeleteFs) Chown(name string, uid, gid int) error {
+	return fmt.Errorf("chown not allowed in no-delete mode")
+}
+
+func (fs *noDeleteFs) Chtimes(name string, atime, mtime time.Time) error {
+	return fmt.Errorf("changing times not allowed in no-delete mode")
+}
+
 // uploadOnlyFs wraps afero.Fs so clients can write (STOR) and list directories
 // but never read a file back (RETR). ftpserverlib downloads a file via
 // OpenFile(..., O_RDONLY) and lists a directory via Open, so reads are denied at
