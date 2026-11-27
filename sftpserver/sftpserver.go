@@ -82,7 +82,13 @@ func (s *SFTPServer) Bind() error {
 // checkPassword verifies SFTP password credentials against -b. The configured
 // password may be a bcrypt hash, which must be verified as a hash rather than
 // compared as the literal password (GHSA-qjjr-pc25-pj69).
+//
+// An empty configured password never authenticates: SFTP auth is mandatory, so
+// it must not degrade to "username only" (GHSA-hhv7-wp66-4vfv).
 func (s *SFTPServer) checkPassword(user, password string) bool {
+	if s.Password == "" {
+		return false
+	}
 	return subtle.ConstantTimeCompare([]byte(user), []byte(s.Username)) == 1 && utils.CheckPassword(s.Password, password)
 }
 

@@ -24,3 +24,11 @@ func TestCheckPassword_Plaintext(t *testing.T) {
 	require.True(t, s.checkPassword("operator", "S3cret-pass"))
 	require.False(t, s.checkPassword("operator", "wrong"))
 }
+
+// GHSA-hhv7-wp66-4vfv: -b 'user:' must not let the username log in with an
+// empty password.
+func TestCheckPassword_EmptyConfiguredPasswordNeverAuthenticates(t *testing.T) {
+	s := &SFTPServer{Username: "user", Password: ""}
+	require.False(t, s.checkPassword("user", ""))
+	require.False(t, s.checkPassword("user", "anything"))
+}

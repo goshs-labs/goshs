@@ -198,3 +198,29 @@ func TestFTP_E2E_RestStorRefusedUnderModeFlags(t *testing.T) {
 		})
 	}
 }
+
+// ─── GHSA-rqv7-6c67-mgjf: SITE CHMOD / MFMT under --no-delete / --upload-only ─
+
+func TestClientFs_ModeFlagsBlockMetadataChanges(t *testing.T) {
+	for name, srv := range map[string]FTPServer{
+		"no-delete":   {NoDelete: true},
+		"upload-only": {UploadOnly: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, root := newBaseFs(t)
+			srv.Root = root
+			fs := srv.clientFs()
+			for _, p := range []string{"/existing.txt", "/"} {
+				require.Error(t, fs.Chmod(p, 0), "SITE CHMOD 000 %s", p)
+				require.Error(t, fs.Chtimes(p, time.Unix(0, 0), time.Unix(0, 0)), "MFMT %s", p)
+				require.Error(t, fs.Chown(p, 0, 0), "chown %s", p)
+			}
+			fi, err := os.Stat(filepath.Join(root, "existing.txt"))
+			require.NoError(t, err)
+			require.NotEqual(t, os.FileMode(0), fi.Mode().Perm())
+			fi, err = os.Stat(root)
+			require.NoError(t, err)
+			require.NotEqual(t, os.FileMode(0), fi.Mode().Perm())
+		})
+	}
+}

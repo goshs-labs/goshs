@@ -663,3 +663,48 @@ func TestUploadOnlyHandler_BlocksOverwrite(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.(io.Closer).Close())
 }
+
+// ─── GHSA-rqv7-6c67-mgjf: --no-delete must refuse SETSTAT permission changes ─
+
+func setstatMode(path string, mode uint32) *sftp.Request {
+	return &sftp.Request{
+		Method:   "Setstat",
+		Filepath: path,
+		Flags:    0x00000004, // SSH_FILEXFER_ATTR_PERMISSIONS
+		Attrs:    []byte{byte(mode >> 24), byte(mode >> 16), byte(mode >> 8), byte(mode)},
+	}
+}
+
+func TestDefaultHandler_NoDelete_BlocksChmod(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "keep.txt")
+	require.NoError(t, os.WriteFile(target, []byte("data"), 0o644))
+	h := &DefaultHandler{Root: dir, ClientIP: "1.2.3.4", SFTPServer: noDeleteServer(dir)}
+
+	for _, p := range []string{"/keep.txt", "/"} {
+		err := h.Filecmd(setstatMode(p, 0o100000)) // S_IFREG|0000, as real clients send
+		require.Error(t, err, p)
+		require.Contains(t, err.Error(), "no delete")
+	}
+	fi, err := os.Stat(target)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o644), fi.Mode().Perm())
+	fi, err = os.Stat(dir)
+	require.NoError(t, err)
+	require.NotEqual(t, os.FileMode(0), fi.Mode().Perm())
+
+	// A times-only SETSTAT (no permissions attribute) is still accepted as a no-op.
+	require.NoError(t, h.Filecmd(&sftp.Request{Method: "Setstat", Filepath: "/keep.txt", Flags: 0x00000008, Attrs: make([]byte, 8)}))
+}
+
+func TestDefaultHandler_Chmod_AllowedWithoutNoDelete(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "f.txt")
+	require.NoError(t, os.WriteFile(target, []byte("data"), 0o644))
+	h := &DefaultHandler{Root: dir, ClientIP: "1.2.3.4", SFTPServer: testSFTPServer(dir)}
+
+	require.NoError(t, h.Filecmd(setstatMode("/f.txt", 0o100600)))
+	fi, err := os.Stat(target)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), fi.Mode().Perm())
+}

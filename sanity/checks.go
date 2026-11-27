@@ -134,6 +134,13 @@ func Check(opts *options.Options) (*options.Options, error) {
 		logger.Fatal("When using SFTP with password authentication, the username cannot be empty. Please provide a non-empty username with -b 'user:pass'.")
 	}
 
+	// Sanity check: empty password is not valid for SFTP password auth either.
+	// SFTP auth is mandatory, and an empty -b password (e.g. -b "$U:$UNSET")
+	// would accept the username with no password (GHSA-hhv7-wp66-4vfv).
+	if opts.FTP && opts.FTPSFTPMode && opts.BasicAuth != "" && strings.HasSuffix(opts.BasicAuth, ":") {
+		logger.Fatal("When using SFTP with password authentication, the password cannot be empty. Please provide a non-empty password with -b 'user:pass', or use an authorized keyfile (-fkf).")
+	}
+
 	if yes, out := update.CheckForUpdates(goshsversion.GoshsVersion); yes {
 		logger.Warnf("There is a newer Version (%s) of goshs available. Run --update to update goshs.", out)
 	} else {
